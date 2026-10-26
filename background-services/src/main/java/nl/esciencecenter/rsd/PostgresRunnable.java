@@ -29,6 +29,11 @@ public class PostgresRunnable implements Runnable {
 		String dbPort = System.getenv("POSTGRES_DB_HOST_PORT");
 		String dbName = System.getenv("POSTGRES_DB");
 		String dbUrl = "jdbc:postgresql://%s:%s/%s".formatted(dbHost, dbPort, dbName);
+		// PLANT-COMMONS: optional JDBC URL parameters, e.g. "sslmode=verify-full&sslrootcert=/path/ca.crt" (TLS to an external database)
+		String dbParams = System.getenv("POSTGRES_DB_JDBC_PARAMS");
+		if (dbParams != null && !dbParams.isBlank()) {
+			dbUrl += "?" + dbParams;
+		}
 		String dbUsername = System.getenv("POSTGRES_USER");
 		String dbPassword = System.getenv("POSTGRES_PASSWORD");
 		try (

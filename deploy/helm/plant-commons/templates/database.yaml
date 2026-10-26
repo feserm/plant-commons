@@ -1,3 +1,4 @@
+{{- if .Values.database.enabled }}
 {{- $c := "database" }}
 {{- $v := .Values.database }}
 {{- $cfg := include "pc.config.database" . | fromYaml }}
@@ -50,3 +51,4 @@ spec:
         resources:
           requests:
             storage: {{ $v.persistence.size | quote }}
+{{- end }}

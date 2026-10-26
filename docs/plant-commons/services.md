@@ -11,7 +11,7 @@ Decision legend: **yes** = deployed by the chart, **optional** = chart flag, off
 
 | Service | Run in k8s? | One-line reason | Evidence |
 |---|---|---|---|
-| database | **yes** | Single source of truth; StatefulSet + PVC, built `rsd/database` image (schema is baked in for first init). | `database/Dockerfile`, `database/000-fill-authenticator-password.sh` |
+| database | **yes** | Single source of truth. On the platform: an external CloudNativePG cluster ([database.md](database.md), `database.enabled=false`); otherwise StatefulSet + PVC, built `rsd/database` image (schema is baked in for first init). | `database/Dockerfile`, `database/000-fill-authenticator-password.sh` |
 | backend (PostgREST) | **yes** | All frontend/auth/scraper data access goes through it; also exposed at `/api/v1`. | `docker-compose.yml`, `nginx/nginx.conf` |
 | auth | **yes** | The only login path (ORCID); also serves `/api/v2` access-token API. | `authentication/.../Main.java` |
 | frontend | **yes** | The site itself; carries the Plant Commons home page (Phase 3). | `frontend/Dockerfile` |
@@ -27,6 +27,8 @@ Decision legend: **yes** = deployed by the chart, **optional** = chart flag, off
 ## Core services: details that affect Phases 4-5
 
 ### database
+- **Platform (PDB):** not run by the chart. CNPG cluster `plant-commons-pg` (PostgreSQL 17.11, TLS only), schema from `deploy/postgres/init.sql` (generated from `database/*.sql`),
+  see [database.md](database.md). The rest of this section describes upstream's image and the chart's own database (`database.enabled=true`).
 - Built from `./database` (`postgres:17.11`). The Dockerfile copies `*.sql`/`*.sh` into
   `/docker-entrypoint-initdb.d`, so the schema is created **only on the first start with an empty
   data directory**. There is no migration runner (see "DB migrations" in implementation.md).
@@ -93,7 +95,9 @@ Decision legend: **yes** = deployed by the chart, **optional** = chart flag, off
 ### background-services
 - No ports, no probes needed beyond process liveness. Run exactly 1 replica.
 - Reads only `POSTGRES_DB_HOST`, `POSTGRES_DB_HOST_PORT`, `POSTGRES_DB`, `POSTGRES_USER`,
-  `POSTGRES_PASSWORD`. It connects as the superuser role `rsd`, so it needs the database but not PostgREST.
+  `POSTGRES_PASSWORD`. It connects as the role `rsd` (superuser in compose and in the chart's own database, plain **owner** on the platform database: its two
+  statements, `REFRESH MATERIALIZED VIEW CONCURRENTLY count_software_mentions_cached` and `SELECT cleanup_expired_token()`, were run as a non-superuser owner and work), so it needs the database but not PostgREST.
+  PLANT-COMMONS: `POSTGRES_DB_JDBC_PARAMS` (optional) is appended to the JDBC URL for TLS, database.md section 1.
 
 ## Optional services: what breaks if omitted
 

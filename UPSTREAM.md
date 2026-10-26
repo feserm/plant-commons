@@ -20,5 +20,9 @@ what upstream changed, and list our own changes with `grep -rn PLANT-COMMONS` pl
 `git diff` of this repo against the imported commit. Apply the upstream diff to this repo
 (e.g. `git apply --3way` or a copy of changed files), resolving conflicts in files that
 carry `PLANT-COMMONS` markers by hand, and check new upstream migrations in `database/`
-and `.env.example` for new variables. Re-run the local baseline (`docker compose up
+and `.env.example` for new variables. **Regenerate `deploy/postgres/init.sql`** with `deploy/postgres/build-init-sql.sh` (it concatenates `database/*.sql`; it fails if an upstream change breaks one of its
+asserted patterns in `001-setup-basic-roles.sql` or introduces a new placeholder) and commit the result. Check the new migrations for anything that needs superuser (`CREATE ROLE`,
+untrusted extensions: docs/plant-commons/database.md section 3), diff the generated schema against upstream's image (database.md section 4), and re-check the `PLANT-COMMONS` change in
+`background-services/.../PostgresRunnable.java` (`POSTGRES_DB_JDBC_PARAMS`). Update `deploy/routing/routes.yaml` if `nginx/nginx.conf` changed (`ci/check.sh` compares it with the Services).
+Re-run the local baseline (`docker compose up
 --build` with `RSD_AUTH_PROVIDERS=LOCAL`) and then update the tag, commit, and date here.

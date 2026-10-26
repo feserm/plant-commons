@@ -4,6 +4,20 @@ podSelector:
   matchLabels:
     {{- include "pc.selectorLabels" . | nindent 4 }}
 {{- end -}}
+
+{{/* PLANT-COMMONS: TCP 443 to the internet: everything except the private/internal ranges (values: networkPolicy.egress.internet). */}}
+{{- define "pc.internetEgress" -}}
+- to:
+    - ipBlock:
+        cidr: {{ .Values.networkPolicy.egress.internet.cidr | quote }}
+        {{- with .Values.networkPolicy.egress.internet.except }}
+        except:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+  ports:
+    - {port: 443, protocol: TCP}
+{{- end -}}
+
 {{- define "pc.policy" -}}
 {{- /* pc.policy (dict "ctx" $ "c" "backend" "ingress" <list of rules> "egress" <list of rules> "egressOn" bool) */ -}}
 apiVersion: networking.k8s.io/v1

@@ -1,12 +1,27 @@
 {{- /*
 STUB, UNTESTED, OFF (dbMigration.enabled=false). There is no migration runner upstream: the schema is only
-created on first start with an empty data directory. For an upgrade you supply upstream's migration SQL for
-the release in a ConfigMap and run it through psql as the superuser. Read README.md ("Database upgrades")
-first. Not run in any cluster; the psql invocation was only checked against the rsd/database image locally.
+created once (first start of the chart's own database, or deploy/postgres/init.sql on the external one). For an
+upgrade you supply upstream's migration SQL for the release in a ConfigMap and run it through psql as the
+database OWNER (external database) or the chart's superuser (database.enabled=true). Read README.md
+("Database upgrades") first. Not run in any cluster; the psql invocation was only checked against the
+rsd/database image locally.
+PLANT-COMMONS: with database.enabled=false the Job connects to externalDatabase with the owner credentials
+(externalDatabase.ownerSecret) over TLS (PGSSLMODE=verify-full, PGSSLROOTCERT = the mounted CA, the same Secret
+as the backend's).
 */ -}}
 {{- if .Values.dbMigration.enabled }}
 {{- $c := "db-migration" }}
-{{- $v := dict "podSecurityContext" .Values.database.podSecurityContext "securityContext" .Values.database.securityContext "resources" .Values.database.resources }}
+{{- $v := dict "podSecurityContext" .Values.database.podSecurityContext "securityContext" .Values.database.securityContext "resources" .Values.dbMigration.resources }}
+{{- /* libpq wants the password as PGPASSWORD; the other owner variables (user name) are kept as they are */}}
+{{- $refs := list }}
+{{- range include "pc.db.ownerRefs" . | fromYamlArray }}
+{{- $refs = append $refs (ternary (dict "name" "PGPASSWORD" "secret" .secret "key" .key) . (eq .name "POSTGRES_PASSWORD")) }}
+{{- end }}
+{{- $env := dict "PGCONNECT_TIMEOUT" "10" }}
+{{- if not .Values.database.enabled }}
+{{- $_ := set $env "PGSSLMODE" .Values.externalDatabase.sslMode }}
+{{- $_ := set $env "PGSSLROOTCERT" (include "pc.db.caFile" .) }}
+{{- end }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -37,7 +52,8 @@ spec:
           # Exec-form args for the image's docker-entrypoint.sh (it execs anything that is not `postgres`).
           # ON_ERROR_STOP + single transaction: a failing migration leaves the database unchanged.
           # $(VAR) is expanded by Kubernetes from the env below. The ConfigMap of background-services holds
-          # exactly POSTGRES_DB_HOST/_PORT/POSTGRES_DB/POSTGRES_USER, so it is reused here.
+          # POSTGRES_DB_HOST/_PORT/POSTGRES_DB (and POSTGRES_USER unless it comes from the owner Secret), so it is
+          # reused here; the owner credentials and the libpq TLS variables are added below.
           args:
             - psql
             - --set=ON_ERROR_STOP=1
@@ -47,15 +63,7 @@ spec:
             - --username=$(POSTGRES_USER)
             - --dbname=$(POSTGRES_DB)
             - --file=/migration/migration.sql
-          envFrom:
-            - configMapRef:
-                name: {{ include "pc.configName" (dict "ctx" . "c" "background-services") }}
-          env:
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "pc.secretName" . }}
-                  key: POSTGRES_PASSWORD
+          {{- include "pc.env" (dict "ctx" . "c" "background-services" "config" true "secretRefs" $refs "env" $env) | nindent 10 }}
           resources:
             {{- toYaml $v.resources | nindent 12 }}
           securityContext:
@@ -64,6 +72,9 @@ spec:
             - name: migration
               mountPath: /migration
               readOnly: true
+            {{- with include "pc.db.caVolumeMounts" . }}
+            {{- . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: migration
           configMap:
@@ -71,4 +82,7 @@ spec:
             items:
               - key: {{ .Values.dbMigration.configMapKey | quote }}
                 path: migration.sql
+        {{- with include "pc.db.caVolumes" . }}
+        {{- . | nindent 8 }}
+        {{- end }}
 {{- end }}

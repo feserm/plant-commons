@@ -37,6 +37,12 @@ Per image, three kinds of tags:
 | `sha-<short sha>` | `auth:sha-6786371` | the **same tag for all services** of one commit. Not really "moving": there is one per commit and it is never reused. Recommended for the chart: one `image.tag` value deploys a consistent set |
 | `<git tag>` | `auth:v0.1.0` | only when built from a git tag (`GIT_TAG`, `CI_COMMIT_TAG`, or a tag on `HEAD`) |
 
+**Digests (platform).** For a release the chart can pin each component to its content digest in addition to the tag
+(`image.digests.<component>`, rendered `repo:tag@sha256:...`; keys `auth`, `backend`, `frontend`, `background-services`, `scrapers`, `database`). The digest of a pushed image is printed
+by the push (`docker buildx imagetools inspect <ref>` or `docker inspect --format '{{index .RepoDigests 0}}'`); the CI does not collect them yet. With the platform database the
+`plant-commons-database` image is **not run** (no StatefulSet): only the optional migration Job borrows its `psql` (PostgreSQL 17, like the server). Its `*.sql`/`*.sh` payload is superseded by
+`deploy/postgres/init.sql` ([database.md](database.md)); the image keeps building because the chart's own database (kind/local tests) and the Job use it.
+
 No `latest` tag is ever produced. A work tree with uncommitted changes to tracked files gets `-dirty`
 appended to the short sha, and `--push` refuses such a tree.
 

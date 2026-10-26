@@ -1,12 +1,14 @@
 {{- $c := "backend" }}
 {{- $v := .Values.backend }}
 {{- $cfg := include "pc.config.backend" . | fromYaml }}
-{{- $dbSvc := include "pc.svc" (dict "ctx" . "c" "database") }}
 {{- /* PGRST_DB_URI is assembled here with Kubernetes $(VAR) expansion from the Secret key
        POSTGRES_AUTHENTICATOR_PASSWORD (declared earlier in env, see pc.env), so the password lives in exactly
-       one Secret key and cannot drift from the database's. Safe because the value is [A-Za-z0-9]. */}}
+       one Secret key and cannot drift from the database's. Safe because the value is [A-Za-z0-9].
+       PLANT-COMMONS: with the external database the URI carries sslmode=verify-full&sslrootcert=<mounted CA>
+       (PostgREST uses libpq), the cluster rejects everything else. */}}
+{{- $ssl := include "pc.db.sslParams" . }}
 {{- $env := dict
-    "PGRST_DB_URI" (printf "postgres://rsd_authenticator:$(POSTGRES_AUTHENTICATOR_PASSWORD)@%s:5432/%s" $dbSvc $.Values.database.name)
+    "PGRST_DB_URI" (printf "postgres://rsd_authenticator:$(POSTGRES_AUTHENTICATOR_PASSWORD)@%s:%s/%s%s" (include "pc.db.host" .) (include "pc.db.port" .) (include "pc.db.name" .) (ternary (printf "?%s" $ssl) "" (ne $ssl "")))
     "PGRST_DB_PRE_REQUEST" "public.pre_request_hook"
     "PGRST_SERVER_HOST" "0.0.0.0"
     "PGRST_DB_POOL" $v.dbPool
@@ -22,7 +24,8 @@
   "ports" (list (dict "name" "http" "port" $v.port) (dict "name" "admin" "port" $v.adminPort))
   "checksum" (include "pc.configChecksum" (dict "data" $cfg))
   "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true
-      "secrets" (list "POSTGRES_AUTHENTICATOR_PASSWORD" "PGRST_JWT_SECRET") "env" $env))
+      "secrets" (list "PGRST_JWT_SECRET") "secretRefs" (include "pc.db.authenticatorRefs" . | fromYamlArray) "env" $env))
+  "extraVolumeMounts" (include "pc.db.caVolumeMounts" .) "extraVolumes" (include "pc.db.caVolumes" .)
   "probes" $probes "replicas" $v.replicas "strategy" $v.strategy }}
 {{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
 ---

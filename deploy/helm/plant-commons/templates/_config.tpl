@@ -27,10 +27,14 @@ RSD_API_ACCESS_TOKEN_ENABLED: {{ .Values.auth.apiAccessTokenEnabled | quote }}
 {{- end -}}
 
 {{- define "pc.config.backgroundServices" -}}
-POSTGRES_DB_HOST: {{ include "pc.svc" (dict "ctx" . "c" "database") }}
-POSTGRES_DB_HOST_PORT: "5432"
-POSTGRES_DB: {{ .Values.database.name }}
-POSTGRES_USER: {{ .Values.database.user }}
+{{- /* PLANT-COMMONS: chart's own database or externalDatabase (templates/_database.tpl). POSTGRES_USER comes from the
+       owner Secret when externalDatabase.ownerSecret.usernameKey is set (then it is an env var, not here). */}}
+POSTGRES_DB_HOST: {{ include "pc.db.host" . | quote }}
+POSTGRES_DB_HOST_PORT: {{ include "pc.db.port" . | quote }}
+POSTGRES_DB: {{ include "pc.db.name" . | quote }}
+{{- with include "pc.db.userLiteral" . }}
+POSTGRES_USER: {{ . | quote }}
+{{- end }}
 {{- end -}}
 
 {{- define "pc.config.frontend" -}}

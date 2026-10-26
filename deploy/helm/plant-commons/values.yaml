@@ -4,14 +4,18 @@
 #
 # Minimum you must set for a real install (everything else has a default):
 #   image.tag, existingSecret, orcid.clientId
+# and, on the target platform (PDB, RKE2 at de.NBI Bielefeld), database.enabled=false with externalDatabase
+# (examples/values-plant-commons.yaml has all of it).
 # (helm lint / helm template fail with a clear message while they are missing.)
 
 nameOverride: ""
 fullnameOverride: ""
 
-# Prefix for the Service names. Empty gives the short names used throughout the docs
-# (`database`, `backend`, `auth`, `frontend`), so the in-cluster URLs are `http://backend:3500`,
-# `http://auth:7000/auth`. Set a prefix only if a second release shares the namespace.
+# Prefix for the Service names. Empty gives the fixed short names used throughout the docs and in
+# deploy/routing/routes.yaml (`backend`, `auth`, `frontend`, [`swagger`], [`database`]), independent of the
+# release name, so the in-cluster URLs are `http://backend:3500`, `http://auth:7000/auth`. Do NOT set a prefix
+# on the platform: the platform takes deploy/routing/routes.yaml unchanged, and ci/check.sh compares it with
+# the rendered Services. Only for a second release in the same namespace.
 serviceNamePrefix: ""
 
 # Public host name, no scheme, no path, no trailing slash. Fixed by CLAUDE.md.
@@ -30,6 +34,11 @@ image:
   # The `sha-<short sha>` tag from the CI build; the SAME tag for every service, so one value
   # deploys a consistent set. Required. `latest` is refused.
   tag: ""
+  # Optional per-component digests, rendered as <repo>:<tag>@sha256:<digest> (the tag stays for humans, the digest
+  # is what is pulled). Keys: auth, backend, frontend, background-services, scrapers, database (database only
+  # for the dbMigration Job, which uses its psql). Empty = tag only. Take them from the CI build output.
+  digests: {}
+  #  auth: sha256:<64 hex>
   pullPolicy: IfNotPresent
 
 # Only for private registries (none needed for public ghcr.io images).
@@ -39,7 +48,11 @@ imagePullSecrets: []
 # Secrets. Never in git. Name of an EXISTING Secret in the release namespace with these keys
 # (key name = variable name, configuration.md section 5), values [A-Za-z0-9] only
 # (generate with `openssl rand -hex 32`):
-#   POSTGRES_PASSWORD, POSTGRES_AUTHENTICATOR_PASSWORD, PGRST_JWT_SECRET, AUTH_ORCID_CLIENT_SECRET
+#   PGRST_JWT_SECRET, AUTH_ORCID_CLIENT_SECRET
+# plus, ONLY with database.enabled=true (the chart's own PostgreSQL, kind/local tests):
+#   POSTGRES_PASSWORD, POSTGRES_AUTHENTICATOR_PASSWORD
+# With an external database the two database passwords come from externalDatabase.ownerSecret and
+# externalDatabase.authenticatorSecret instead, never from here.
 # Optional scraper keys (only read when scrapers.enabled): API_CREDENTIALS_GITHUB,
 # ZENODO_ACCESS_TOKEN, OPENALEX_API_KEY, LIBRARIES_IO_ACCESS_TOKEN
 existingSecret: ""
@@ -78,7 +91,12 @@ tolerations: []
 affinity: {}
 
 # ---------------------------------------------------------------------------------------------
+# The chart's OWN PostgreSQL (StatefulSet + Service + PVC, upstream's database image). For kind/local tests and
+# as the default. The target platform does not allow application-managed PostgreSQL: set enabled=false and fill
+# externalDatabase below. With enabled=false nothing in this block is rendered (the dbMigration Job still
+# borrows the image's psql, see dbMigration).
 database:
+  enabled: true
   # POSTGRES_DB (ConfigMap). Keep [a-z0-9-]: it is sed-substituted into SQL at first init.
   name: rsd-db
   # POSTGRES_USER (ConfigMap), superuser role, also used by background-services.
@@ -96,7 +114,7 @@ database:
   # Not measured; starting estimates to be tuned in Phase 6.
   resources:
     requests: {cpu: 250m, memory: 512Mi}
-    limits: {memory: 1Gi}
+    limits: {cpu: "1", memory: 1Gi}
   # Runs as postgres (uid 999) from the start; fsGroup 999 makes the PVC writable (images.md section 6).
   # readOnlyRootFilesystem stays false: the init script 000-fill-authenticator-password.sh runs
   # `sed --in-place` inside /docker-entrypoint-initdb.d (root filesystem).
@@ -111,6 +129,37 @@ database:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
     capabilities: {drop: [ALL]}
+
+# An EXTERNAL PostgreSQL provided by the platform (CloudNativePG cluster, PostgreSQL 17, TLS only: the cluster
+# rejects unencrypted connections). Used when database.enabled=false. The schema is created once from
+# deploy/postgres/init.sql (docs/plant-commons/database.md); the chart never initialises the database.
+externalDatabase:
+  # Read-write Service of the CNPG cluster (<cluster>-rw), same namespace.
+  host: plant-commons-pg-rw
+  port: 5432
+  # Database name and owner role (created by CNPG, owner of the database; NOT a superuser).
+  name: rsd-db
+  # Owner role name. Used only when ownerSecret.usernameKey is empty; otherwise the name is read from the Secret.
+  user: rsd
+  # verify-full (default) or verify-ca. Both verify the server certificate against caSecret; no weaker mode exists.
+  # verify-full also checks that `host` is in the certificate (CNPG's -rw Service name and its .<ns>.svc forms are).
+  sslMode: verify-full
+  # CA certificate (PEM) that signed the server certificate; Secret in the release namespace, mounted READ-ONLY
+  # at /etc/plant-commons/db-ca/ca.crt into every pod that connects (backend, background-services, dbMigration Job).
+  caSecret:
+    name: plant-commons-pg-ca
+    key: ca.crt
+  # Credentials of the owner role (Secret generated by CNPG for the app user): used by background-services
+  # (materialised view refresh) and the dbMigration Job. Empty usernameKey = use `user` above.
+  ownerSecret:
+    name: plant-commons-pg-app
+    usernameKey: username
+    passwordKey: password
+  # Password of rsd_authenticator (PostgREST), created by the platform from its vault as a CNPG managed role.
+  # Values must be URL-safe ([A-Za-z0-9]): the chart puts the password into PGRST_DB_URI.
+  authenticatorSecret:
+    name: plant-commons-pg-role-rsd-authenticator
+    key: password
 
 backend:
   replicas: 1 # stateless (verified: no local state), 2 is possible; open question
@@ -129,7 +178,7 @@ backend:
   podDisruptionBudget: {enabled: false, minAvailable: 1} # only with replicas >= 2
   resources:
     requests: {cpu: 100m, memory: 128Mi}
-    limits: {memory: 512Mi}
+    limits: {cpu: "1", memory: 512Mi}
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1000
@@ -166,7 +215,7 @@ auth:
   # Not measured; starting estimates. Heap = 70% of 768Mi (~537Mi), rest for metaspace/threads.
   resources:
     requests: {cpu: 100m, memory: 384Mi}
-    limits: {memory: 768Mi}
+    limits: {cpu: "1", memory: 768Mi}
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 10001
@@ -190,7 +239,7 @@ frontend:
   podDisruptionBudget: {enabled: false, minAvailable: 1}
   resources:
     requests: {cpu: 100m, memory: 256Mi}
-    limits: {memory: 1Gi}
+    limits: {cpu: "1", memory: 1Gi}
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 1001
@@ -208,7 +257,7 @@ backgroundServices:
   terminationGracePeriodSeconds: 30
   resources:
     requests: {cpu: 50m, memory: 256Mi}
-    limits: {memory: 512Mi}
+    limits: {cpu: 500m, memory: 512Mi}
   podSecurityContext:
     runAsNonRoot: true
     runAsUser: 10001
@@ -238,7 +287,7 @@ scrapers:
   terminationGracePeriodSeconds: 30
   resources:
     requests: {cpu: 100m, memory: 256Mi}
-    limits: {memory: 768Mi}
+    limits: {cpu: 500m, memory: 768Mi}
   # cron needs root and writes /etc/environment, so no non-root and no readOnlyRootFilesystem. Measured
   # (docker, --cap-drop ALL): cron only runs its jobs with SETUID and SETGID added back.
   podSecurityContext:
@@ -254,7 +303,7 @@ swagger:
   image: swaggerapi/swagger-ui:v5.32.6
   resources:
     requests: {cpu: 20m, memory: 32Mi}
-    limits: {memory: 128Mi}
+    limits: {cpu: 100m, memory: 128Mi}
   # The image entrypoint rewrites files under /usr/share/nginx/html and /etc/nginx at start, so it needs
   # a writable root filesystem and root; measured (docker): CHOWN, SETUID, SETGID are enough.
   podSecurityContext:
@@ -267,8 +316,10 @@ swagger:
 # Not implemented, by decision: codemeta, mail stack (rabbitmq, mail, publisher), documentation.
 
 # ---------------------------------------------------------------------------------------------
-# Optional database upgrade Job: STUB, UNTESTED, off. Runs a SQL file YOU supply in a ConfigMap
-# (e.g. upstream's migration SQL for the release) through psql as the superuser. See README.
+# Optional database upgrade Job: STUB, UNTESTED against a cluster, off. Runs a SQL file YOU supply in a ConfigMap
+# (e.g. upstream's migration SQL for the release) through psql as the database OWNER. With
+# database.enabled=false it connects to externalDatabase (TLS, verify-full, owner credentials from
+# externalDatabase.ownerSecret); with database.enabled=true as the chart's superuser. See README.
 dbMigration:
   enabled: false
   # Suffix of the Job name; change it for every run (Jobs are immutable).
@@ -276,49 +327,57 @@ dbMigration:
   # Existing ConfigMap in the namespace and the key holding the SQL.
   configMapName: ""
   configMapKey: migration.sql
+  # Only psql is needed; the image is plant-commons-database (image.digests.database applies), PostgreSQL 17 like the server.
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
 
 # ---------------------------------------------------------------------------------------------
-# Optional NetworkPolicies, default off (open question 15). Requires a CNI that enforces them.
+# NetworkPolicies (default off; the platform example turns them on). Requires a CNI that enforces them (RKE2:
+# canal/Calico does). Default-deny ingress for every pod of the release, allow-lists per component; with
+# egress.enabled also default-deny egress. Who talks to whom (checked in the code, docs/plant-commons/services.md):
+#   ingress controller -> frontend:3000, backend:3500, auth:7000 (the routes in deploy/routing/routes.yaml; swagger:8080 if enabled)
+#   frontend -> backend:3500, auth:7000        auth -> backend:3500        scrapers -> backend:3500
+#   backend, background-services, dbMigration Job -> database:5432
+#   internet 443: auth (ORCID well-known), frontend (server-side Crossref/DataCite/OpenAlex/doi.org and the markdown
+#   import fetch arbitrary https URLs), scrapers. Nothing else has internet access.
 networkPolicy:
   enabled: false
-  # Peers (NetworkPolicyPeer list) allowed to reach frontend, backend, auth (and swagger): your ingress
-  # controller's pods, cluster specific, e.g.
-  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <traefik namespace>}}
-  #     podSelector: {matchLabels: {app.kubernetes.io/name: traefik}}
-  # Required when enabled (the default-deny ingress would otherwise take the site offline).
-  ingressFrom: []
+  # Peers (NetworkPolicyPeer list) allowed to reach frontend, backend, auth (and swagger): the ingress controller.
+  # Default = the platform's Traefik. Required when enabled (the default-deny ingress would otherwise take the site offline).
+  ingressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: traefik}}
+      podSelector: {matchLabels: {app.kubernetes.io/name: traefik}}
   egress:
-    # Also restrict egress (default-deny egress + allow rules). Off by default: needs the two lists below.
-    enabled: false
-    # Peers for DNS, standard form for CoreDNS shown; adjust to your cluster.
+    # Also restrict egress (default-deny egress + the allow rules below).
+    enabled: true
+    # Peers for DNS (CoreDNS in RKE2), UDP and TCP 53.
     dns:
       - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
         podSelector: {matchLabels: {k8s-app: kube-dns}}
-    # Required when egress.enabled: `to` entries (NetworkPolicyPeer list) for orcid.org:443 from the auth pod.
-    # Plain NetworkPolicy cannot match host names, so this needs CIDRs (changeable by ORCID) or a
-    # CNI specific FQDN policy (Cilium/Calico); NOT guessed here. Shape:
-    #   - ipBlock: {cidr: <ORCID address range>/32}
-    orcid: []
-    # Same for the scrapers (only used when scrapers.enabled): GitHub, GitLab, Zenodo, Crossref, ...
-    scrapers: []
+    # Peers of the external database, port 5432 (only used with database.enabled=false). A podSelector alone
+    # means "same namespace". The platform's CNPG pods carry cnpg.io/cluster=<cluster name>. The platform handles
+    # ingress to the database (operator, Prometheus), this chart does not render a policy for it.
+    database:
+      - podSelector: {matchLabels: {cnpg.io/cluster: plant-commons-pg}}
+    # Internet, TCP 443 only, for auth, frontend and (if enabled) scrapers. ORCID is behind Cloudflare, so there are no
+    # fixed addresses: everything except the private/internal ranges below.
+    internet:
+      cidr: 0.0.0.0/0
+      except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 100.64.0.0/10, 127.0.0.0/8]
+  # Prometheus: not applicable, nothing in this chart exposes metrics or has a ServiceMonitor (PostgREST's admin
+  # port 3501 is not published by any Service, database metrics are the platform's). Add a peer from the
+  # `monitoring` namespace here only together with a ServiceMonitor.
 
 # ---------------------------------------------------------------------------------------------
-# Routing and TLS: OPTIONAL, OFF, BLOCKED on open questions 3 and 13. Rendered by templates/routing.yaml
-# from the Traefik-neutral spec in docs/plant-commons/routing.md, as Traefik IngressRoute + Middleware
-# and a cert-manager Certificate. Nothing below is an invented scheme: every cluster specific input
-# is a value without default.
+# Routing and TLS. DECIDED for the platform: routing.enabled stays false. The platform generates routes and the
+# certificate from its service registry, using deploy/routing/routes.yaml (host, paths, Service names and ports,
+# strip prefixes, body limits, headers) unchanged, so the chart renders no Ingress, IngressRoute, Middleware or
+# Certificate. The Services it routes to have fixed names and named ports (serviceNamePrefix above).
 #
-# The six inputs routing.md says are still missing (answers decide how/whether this file is used):
-#   1. Mechanism: Traefik IngressRoute (this file) vs Ingress vs Gateway API HTTPRoute vs routes
-#      generated by the "service registry" from labels/annotations on the Service.
-#   2. The registry's annotation/label scheme (host, path prefix, middlewares, different backend per
-#      prefix on one host). Until known, use routing.annotations / routing.labels below.
-#   3. Middleware ownership: may the chart create Middleware objects in its namespace (this file
-#      does) or must they be cluster provided / cross-namespace?
-#   4. cert-manager: (Cluster)Issuer name, challenge type, and whether the registry creates the
-#      Certificate or the chart must (this file does, routing.certificate).
-#   5. Entrypoint names, global HTTP->HTTPS redirect, Traefik version (apiVersion below).
-#   6. Namespace and NetworkPolicy defaults (default-deny egress blocks auth -> orcid.org).
+# Everything below is the OLD, optional, untested alternative: a Traefik IngressRoute + Middleware and a
+# cert-manager Certificate rendered from the spec in docs/plant-commons/routing.md, for a cluster without such a
+# registry. Every cluster specific input is a value without default. Do not enable it on the platform.
 routing:
   enabled: false
   # traefik.io/v1alpha1 for Traefik >= 2.10; traefik.containo.us/v1alpha1 for older. Input 5.

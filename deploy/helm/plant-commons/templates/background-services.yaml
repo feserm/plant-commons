@@ -3,12 +3,17 @@
 {{- $cfg := include "pc.config.backgroundServices" . | fromYaml }}
 {{- $env := dict }}
 {{- if $v.javaToolOptions }}{{- $_ := set $env "JAVA_TOOL_OPTIONS" $v.javaToolOptions }}{{- end }}
+{{- /* PLANT-COMMONS: TLS to the external database. The JDBC URL is built in the code (PostgresRunnable.java) from
+       POSTGRES_DB_HOST/_PORT/POSTGRES_DB; pgjdbc has no environment variable for ssl settings, so the one
+       PLANT-COMMONS change there appends POSTGRES_DB_JDBC_PARAMS to the URL. */}}
+{{- with include "pc.db.sslParams" . }}{{- $_ := set $env "POSTGRES_DB_JDBC_PARAMS" . }}{{- end }}
 {{- /* Exactly one replica, Recreate (never two refreshers), no Service, no ports, so no HTTP probes. It starts
        fine while the database is down (measured: first job runs after a 30 s delay), so no init container. */}}
 {{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
   "args" $v.args
   "checksum" (include "pc.configChecksum" (dict "data" $cfg))
-  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true "secrets" (list "POSTGRES_PASSWORD") "env" $env))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true "secretRefs" (include "pc.db.ownerRefs" . | fromYamlArray) "env" $env))
+  "extraVolumeMounts" (include "pc.db.caVolumeMounts" .) "extraVolumes" (include "pc.db.caVolumes" .)
   "emptyDirs" (list "/tmp") "replicas" 1 "strategy" (dict "type" "Recreate") }}
 {{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
 ---

@@ -1,12 +1,17 @@
 {{- /*
 Optional (networkPolicy.enabled, default off). Who really talks to whom (checked in the code, services.md):
-  database   <- backend, background-services (and the optional migration Job)
+  database   <- backend, background-services (and the optional migration Job); only rendered with database.enabled
   backend    <- frontend, auth, scrapers, ingress controller (/api/v1, /image)
   auth       <- frontend (RSD_AUTH_URL), ingress controller (/auth, /api/v2)
   frontend   <- ingress controller
   swagger    <- ingress controller
-and, with egress.enabled, what each pod may reach. Plain NetworkPolicy cannot match host names, so the
-egress rules for orcid.org / scraper targets come from values (no CIDR is guessed).
+and, with egress.enabled, what each pod may reach:
+  frontend -> backend, auth, internet:443     auth -> backend, internet:443     scrapers -> backend, internet:443
+  backend, background-services, migration Job -> the database (own pod, or the platform's CNPG pods) :5432
+  everything -> DNS
+No other component has internet access. Plain NetworkPolicy cannot match host names (ORCID is behind Cloudflare),
+so "internet" is 0.0.0.0/0 minus the private ranges, TCP 443 only. Prometheus: not applicable (values.yaml).
+PLANT-COMMONS: ingress to the external database is the platform's business, no policy is rendered for it.
 */ -}}
 {{- if .Values.networkPolicy.enabled }}
 {{- $np := .Values.networkPolicy }}
@@ -15,28 +20,33 @@ egress rules for orcid.org / scraper targets come from values (no CIDR is guesse
 {{- if .Values.dbMigration.enabled }}{{ $dbFrom = append $dbFrom (include "pc.peer" (dict "ctx" . "c" "db-migration") | fromYaml) }}{{ end }}
 {{- $beFrom := list (include "pc.peer" (dict "ctx" . "c" "frontend") | fromYaml) (include "pc.peer" (dict "ctx" . "c" "auth") | fromYaml) }}
 {{- if .Values.scrapers.enabled }}{{ $beFrom = append $beFrom (include "pc.peer" (dict "ctx" . "c" "scrapers") | fromYaml) }}{{ end }}
-{{- $dbTo := list (dict "to" (list (include "pc.peer" (dict "ctx" . "c" "database") | fromYaml)) "ports" (list (dict "port" 5432 "protocol" "TCP"))) }}
+{{- $dbPeers := $np.egress.database }}
+{{- if .Values.database.enabled }}{{ $dbPeers = list (include "pc.peer" (dict "ctx" . "c" "database") | fromYaml) }}{{ end }}
+{{- $dbTo := list (dict "to" $dbPeers "ports" (list (dict "port" 5432 "protocol" "TCP"))) }}
 {{- $beTo := dict "to" (list (include "pc.peer" (dict "ctx" . "c" "backend") | fromYaml)) "ports" (list (dict "port" .Values.backend.port "protocol" "TCP")) }}
+{{- $inet := include "pc.internetEgress" . | fromYamlArray }}
+{{- if .Values.database.enabled }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "database" "egressOn" $egress
     "ingress" (list (dict "from" $dbFrom "ports" (list (dict "port" 5432 "protocol" "TCP"))))) }}
+{{- end }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "backend" "egressOn" $egress "egress" $dbTo
     "ingress" (list (dict "from" (concat $beFrom $np.ingressFrom) "ports" (list (dict "port" .Values.backend.port "protocol" "TCP"))))) }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "auth" "egressOn" $egress
-    "egress" (list $beTo (dict "to" $np.egress.orcid "ports" (list (dict "port" 443 "protocol" "TCP"))))
+    "egress" (concat (list $beTo) $inet)
     "ingress" (list (dict "from" (concat (list (include "pc.peer" (dict "ctx" . "c" "frontend") | fromYaml)) $np.ingressFrom) "ports" (list (dict "port" 7000 "protocol" "TCP"))))) }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "frontend" "egressOn" $egress
-    "egress" (list $beTo (dict "to" (list (include "pc.peer" (dict "ctx" . "c" "auth") | fromYaml)) "ports" (list (dict "port" 7000 "protocol" "TCP"))))
+    "egress" (concat (list $beTo (dict "to" (list (include "pc.peer" (dict "ctx" . "c" "auth") | fromYaml)) "ports" (list (dict "port" 7000 "protocol" "TCP")))) $inet)
     "ingress" (list (dict "from" $np.ingressFrom "ports" (list (dict "port" 3000 "protocol" "TCP"))))) }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "background-services" "egressOn" $egress "egress" $dbTo "ingress" (list)) }}
 {{- if .Values.scrapers.enabled }}
 ---
 {{ include "pc.policy" (dict "ctx" . "c" "scrapers" "egressOn" $egress
-    "egress" (list $beTo (dict "to" $np.egress.scrapers "ports" (list (dict "port" 443 "protocol" "TCP"))))
+    "egress" (concat (list $beTo) $inet)
     "ingress" (list)) }}
 {{- end }}
 {{- if .Values.swagger.enabled }}

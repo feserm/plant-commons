@@ -19,6 +19,8 @@ REPO_ROOT=$(cd "$CHART_DIR/../../.." 2>/dev/null && pwd || true)
 
 CI="-f $CHART/ci/values-ci.yaml"
 FULL="$CI -f $CHART/ci/values-full.yaml"
+EXT="$CI -f $CHART/ci/values-external.yaml"   # PLANT-COMMONS: the platform's shape (external database)
+DIGEST=sha256:$(printf 'a%.0s' $(seq 64))
 KIND="-f $CHART/examples/values-kind.yaml"
 APIV="--api-versions traefik.io/v1alpha1 --api-versions cert-manager.io/v1"
 OUT=$(mktemp -d)
@@ -31,7 +33,7 @@ section() { echo; echo "== $*"; }
 
 # ---------------------------------------------------------------------------------------------------
 section "helm lint"
-for args in "$CI" "$KIND" "$FULL" "-f $CHART/examples/values-plant-commons.yaml --set image.tag=sha-0000000"; do
+for args in "$CI" "$KIND" "$FULL" "$EXT" "-f $CHART/examples/values-plant-commons.yaml --set image.tag=sha-0000000"; do
   # shellcheck disable=SC2086
   if $HELM lint "$CHART" $args >"$OUT/lint.txt" 2>&1; then ok "lint $args"; else bad "lint $args"; cat "$OUT/lint.txt"; fi
 done
@@ -52,6 +54,8 @@ render default   $CI
 render kind      $KIND
 render plantcommons -f $CHART/examples/values-plant-commons.yaml --set image.tag=sha-0000000
 render full      $FULL $APIV
+render external  $EXT
+render digests   $CI --set image.digests.auth=$DIGEST --set image.digests.database=$DIGEST --set dbMigration.enabled=true --set dbMigration.configMapName=x
 render scrapers  $CI --set scrapers.enabled=true
 render swagger   $CI --set swagger.enabled=true
 render netpol    $CI --set networkPolicy.enabled=true --set-json 'networkPolicy.ingressFrom=[{"namespaceSelector":{}}]'
@@ -101,8 +105,21 @@ neg "JDWP in JAVA_TOOL_OPTIONS (template)"     'JDWP' $CI --skip-schema-validati
 neg "PDB with one replica"                     'replicas >= 2' $CI --set backend.podDisruptionBudget.enabled=true
 neg "routing without entryPoints"              'routing.entryPoints' $CI --set routing.enabled=true
 neg "routing without issuer"                   'issuerRef.name' $CI --set routing.enabled=true --set 'routing.entryPoints={x}'
-neg "networkPolicy without ingressFrom"        'ingressFrom' $CI --set networkPolicy.enabled=true
-neg "networkPolicy egress without ORCID peers" 'egress.orcid' $CI --set networkPolicy.enabled=true --set networkPolicy.egress.enabled=true --set-json 'networkPolicy.ingressFrom=[{"namespaceSelector":{}}]'
+neg "networkPolicy without ingressFrom"        'ingressFrom' $CI --set networkPolicy.enabled=true --set-json 'networkPolicy.ingressFrom=[]'
+neg "networkPolicy egress without DNS peers"   'egress.dns' $CI --set networkPolicy.enabled=true --set-json 'networkPolicy.egress.dns=[]'
+neg "external DB: networkPolicy without DB peers" 'egress.database' $CI --set database.enabled=false --set networkPolicy.enabled=true --set-json 'networkPolicy.egress.database=[]'
+neg "removed value networkPolicy.egress.orcid" 'Additional property orcid' $CI --set-json 'networkPolicy.egress.orcid=[]'
+neg "no CPU limit (schema)"                    'cpu' $CI --set backend.resources.limits.cpu=null
+neg "no CPU limit on the migration Job"        'cpu' $CI --set dbMigration.resources.limits.cpu=null
+neg "sslMode=disable (schema)"                 'sslMode' $CI --set database.enabled=false --set externalDatabase.sslMode=disable
+neg "sslMode=require (template)"               'verify-full or verify-ca only' $CI --skip-schema-validation --set database.enabled=false --set externalDatabase.sslMode=require
+neg "external DB without CA Secret name"       'caSecret' $CI --set database.enabled=false --set externalDatabase.caSecret.name=
+neg "external DB without authenticator Secret" 'authenticatorSecret' $CI --set database.enabled=false --set externalDatabase.authenticatorSecret.name=
+neg "external DB: DB passwords in secrets.values" 'database.enabled=true only' $CI --skip-schema-validation --set database.enabled=false --set existingSecret= --set secrets.create=true \
+     --set secrets.values.POSTGRES_PASSWORD=abc --set secrets.values.PGRST_JWT_SECRET=abcdefghijabcdefghijabcdefghijabcdefghij --set secrets.values.AUTH_ORCID_CLIENT_SECRET=x
+neg "digest without sha256: (schema)"          'digests' $CI --set image.digests.auth=abc
+neg "digest without sha256: (template)"        'sha256:<64' $CI --skip-schema-validation --set image.digests.auth=abc
+neg "digest for an unknown component"          'digests' $CI --set image.digests.nginx=$DIGEST
 neg "dbMigration without ConfigMap"            'configMapName' $CI --set dbMigration.enabled=true
 neg "unknown top-level value (typo)"           'Additional property' $CI --set hots=x
 }
@@ -120,10 +137,13 @@ CONT="$WL | .spec.template.spec.containers[]"
 expect() { # description, expected, actual
   if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected '$2', got '$3')"; fi
 }
-for r in default kind full scrapers swagger; do
+for r in default kind full external scrapers swagger; do
   expect "[$r] no container has a command: (args only)" 0 "$(q "[$CONT | select(has(\"command\"))] | length" $r)"
   expect "[$r] every container has securityContext" 0 "$(q "[$CONT | select(has(\"securityContext\") | not)] | length" $r)"
   expect "[$r] every container has resources (requests+limits)" 0 "$(q "[$CONT | select((.resources.requests.memory and .resources.limits.memory) | not)] | length" $r)"
+  # PLANT-COMMONS: explicit CPU limit and request everywhere (the namespace LimitRange would impose 500m), init containers included
+  expect "[$r] every container (init and job included) has a CPU limit and request" 0 "$(q "[$WL | .spec.template.spec | ((.containers // []) + (.initContainers // []))[] | select((.resources.limits.cpu and .resources.requests.cpu) | not)] | length" $r)"
+  expect "[$r] every port of every Service is named" 0 "$(q '[select(.kind == "Service") | .spec.ports[] | select(has("name") | not)] | length' $r)"
   expect "[$r] allowPrivilegeEscalation=false and drop ALL everywhere" 0 "$(q "[$CONT | select((.securityContext.allowPrivilegeEscalation == false and (.securityContext.capabilities.drop | contains([\"ALL\"]))) | not)] | length" $r)"
   expect "[$r] seccompProfile RuntimeDefault on every pod" 0 "$(q "[$WL | .spec.template.spec | select(.securityContext.seccompProfile.type != \"RuntimeDefault\")] | length" $r)"
   expect "[$r] automountServiceAccountToken=false on every pod" 0 "$(q "[$WL | .spec.template.spec | select(.automountServiceAccountToken != false)] | length" $r)"
@@ -170,7 +190,7 @@ expect "[replicas2] frontend/backend replicas 2" "2 2" "$(q 'select(.kind == "De
 
 # no secrets in ConfigMaps (kind render has fake secret values in a Secret)
 secret_keys='POSTGRES_PASSWORD POSTGRES_AUTHENTICATOR_PASSWORD PGRST_JWT_SECRET AUTH_ORCID_CLIENT_SECRET API_CREDENTIALS_GITHUB ZENODO_ACCESS_TOKEN OPENALEX_API_KEY LIBRARIES_IO_ACCESS_TOKEN'
-for r in default kind full; do
+for r in default kind full external; do
   keys=$(q 'select(.kind == "ConfigMap") | .data | keys | .[]' $r | sort -u | xargs)
   leak=""; for k in $secret_keys; do case " $keys " in *" $k "*) leak="$leak $k";; esac; done
   expect "[$r] no secret key name in any ConfigMap" "" "${leak# }"
@@ -183,6 +203,65 @@ expect "[kind] no secret value appears in any ConfigMap" 0 "$leaks"
 expect "[kind] no secret value in any pod spec literal env" 0 "$(q "[$CONT | .env[]? | select(has(\"value\")) | select(.value | test(\"kindfake\"))] | length" kind)"
 expect "[default] no Secret object when secrets.create=false" 0 "$(q '[select(.kind == "Secret")] | length' default)"
 expect "[default] every Secret reference uses existingSecret" "plant-commons-secrets" "$(q "$CONT | .env[]? | select(has(\"valueFrom\")) | .valueFrom.secretKeyRef.name" default | sort -u | xargs)"
+
+# ---- PLANT-COMMONS: external database (the platform's CloudNativePG cluster)
+expect "[external] no StatefulSet, PVC or database Service/ConfigMap" 0 "$(q '[select(.kind == "StatefulSet" or .kind == "PersistentVolumeClaim" or (.metadata.labels."app.kubernetes.io/component" == "database"))] | length' external)"
+expect "[external] workloads: auth backend background-services frontend scrapers swagger + migration Job" "auth backend background-services db-migration frontend scrapers swagger" "$(q "$WL | .metadata.labels.\"app.kubernetes.io/component\"" external | sort | xargs)"
+expect "[external] backend PGRST_DB_URI uses TLS with verification and the mounted CA" 'postgres://rsd_authenticator:$(POSTGRES_AUTHENTICATOR_PASSWORD)@plant-commons-pg-rw:5432/rsd-db?sslmode=verify-full&sslrootcert=/etc/plant-commons/db-ca/ca.crt' "$(q 'select(.kind == "Deployment" and .metadata.labels."app.kubernetes.io/component" == "backend") | .spec.template.spec.containers[0].env[] | select(.name == "PGRST_DB_URI") | .value' external)"
+expect "[external] backend, background-services and the Job mount the CA Secret read-only" "plant-commons-pg-ca plant-commons-pg-ca plant-commons-pg-ca" "$(q "$WL | select(.metadata.labels.\"app.kubernetes.io/component\" == \"backend\" or .metadata.labels.\"app.kubernetes.io/component\" == \"background-services\" or .metadata.labels.\"app.kubernetes.io/component\" == \"db-migration\") | .spec.template.spec | select(.containers[0].volumeMounts[] | select(.name == \"db-ca\" and .readOnly == true and .mountPath == \"/etc/plant-commons/db-ca\")) | .volumes[] | select(.name == \"db-ca\") | .secret.secretName" external | xargs)"
+expect "[external] no other pod mounts the CA" 0 "$(q "[$WL | select(.metadata.labels.\"app.kubernetes.io/component\" | test(\"^(backend|background-services|db-migration)\$\") | not) | .spec.template.spec.volumes[]? | select(.name == \"db-ca\")] | length" external)"
+expect "[external] background-services: JDBC params with TLS, owner credentials from the CNPG Secret" "sslmode=verify-full&sslrootcert=/etc/plant-commons/db-ca/ca.crt plant-commons-pg-app/username plant-commons-pg-app/password" "$(q 'select(.kind == "Deployment" and .metadata.labels."app.kubernetes.io/component" == "background-services") | .spec.template.spec.containers[0].env | ((.[] | select(.name == "POSTGRES_DB_JDBC_PARAMS") | .value), (.[] | select(.name == "POSTGRES_USER") | .valueFrom.secretKeyRef | .name + "/" + .key), (.[] | select(.name == "POSTGRES_PASSWORD") | .valueFrom.secretKeyRef | .name + "/" + .key))' external | xargs)"
+expect "[external] migration Job: libpq TLS variables, owner credentials, host from externalDatabase" "verify-full /etc/plant-commons/db-ca/ca.crt plant-commons-pg-app/password plant-commons-pg-rw" "$(q 'select(.kind == "Job") | .spec.template.spec.containers[0].env | ((.[] | select(.name == "PGSSLMODE") | .value), (.[] | select(.name == "PGSSLROOTCERT") | .value), (.[] | select(.name == "PGPASSWORD") | .valueFrom.secretKeyRef | .name + "/" + .key))' external | xargs) $(q 'select(.kind == "ConfigMap" and .metadata.name == "plant-commons-background-services") | .data.POSTGRES_DB_HOST' external)"
+expect "[external] database passwords never come from existingSecret" 0 "$(q "[$CONT | .env[]? | select(.valueFrom.secretKeyRef.name == \"plant-commons-secrets\" and (.valueFrom.secretKeyRef.key == \"POSTGRES_PASSWORD\" or .valueFrom.secretKeyRef.key == \"POSTGRES_AUTHENTICATOR_PASSWORD\"))] | length" external)"
+expect "[external] Secret names referenced" "plant-commons-pg-app plant-commons-pg-role-rsd-authenticator plant-commons-secrets" "$(q "$CONT | .env[]? | select(has(\"valueFrom\")) | .valueFrom.secretKeyRef.name" external | sort -u | xargs)"
+expect "[default] chart's own database: no TLS parameters, no CA volume, no JDBC params" 0 "$(q '[select(.kind == "Deployment") | .spec.template.spec | (.volumes[]? | select(.name == "db-ca")), (.containers[0].env[]? | select(.name == "POSTGRES_DB_JDBC_PARAMS" or .name == "PGSSLMODE"))] | length' default)"
+
+# ---- PLANT-COMMONS: image digests
+expect "[digests] image digest appended only where set (database: StatefulSet and Job)" "ghcr.io/example/plant-commons/plant-commons-auth:sha-0000000@$DIGEST ghcr.io/example/plant-commons/plant-commons-database:sha-0000000@$DIGEST" "$(q "$CONT | .image | select(contains(\"@\"))" digests | sort -u | xargs)"
+expect "[digests] components without a digest keep repo:tag" 0 "$(q "[$CONT | .image | select(contains(\"@\") | not) | select(test(\":sha-0000000\$\") | not)] | length" digests)"
+
+# ---- PLANT-COMMONS: Services vs deploy/routing/routes.yaml (the platform takes that file unchanged)
+ROUTES="$REPO_ROOT/deploy/routing/routes.yaml"
+if [ -n "$REPO_ROOT" ] && [ -f "$ROUTES" ]; then
+  for r in external full; do
+    exp=$($YQ eval '.routes[] | .service + ":" + (.port | tostring)' - <"$ROUTES" | sort -u | xargs)
+    # every routed service:port exists as a Service (name independent of the release), with a named port
+    have=$(q 'select(.kind == "Service") | .metadata.name as $n | .spec.ports[] | $n + ":" + (.port | tostring)' $r | sort -u | xargs)
+    miss=""; for e in $exp; do case " $have " in *" $e "*) ;; *) miss="$miss $e";; esac; done
+    expect "[$r] every route target of routes.yaml is a rendered Service:port" "" "${miss# }"
+  done
+  expect "[routes.yaml] host equals the chart's default host" "plant-commons.ipk-gatersleben.de" "$($YQ eval '.host' - <"$ROUTES")"
+  expect "[routes.yaml] routes" "/auth/ /api/v1/ /api/v2/ /image/ /" "$($YQ eval '.routes[].path' - <"$ROUTES" | xargs)"
+  expect "[routes.yaml] only components the chart deploys by default (no codemeta/documentation, swagger not routed)" "auth backend frontend" "$($YQ eval '.routes[].service' - <"$ROUTES" | sort -u | xargs)"
+  expect "[external] Service names do not contain the release name" "auth backend frontend swagger" "$(q 'select(.kind == "Service") | .metadata.name' external | sort | xargs)"
+  expect "[default] Service names do not contain the release name" "auth backend database frontend" "$(q 'select(.kind == "Service") | .metadata.name' default | sort | xargs)"
+fi
+
+# ---- PLANT-COMMONS: NetworkPolicies of the platform shape
+NP='select(.kind == "NetworkPolicy")'
+npc() { # component -> policy of that component
+  echo "select(.kind == \"NetworkPolicy\" and .metadata.labels.\"app.kubernetes.io/component\" == \"$1\")"
+}
+expect "[external] policies for every pod, none for the database" "auth backend background-services db-migration frontend scrapers swagger" "$(q "$NP | .metadata.labels.\"app.kubernetes.io/component\"" external | sort | xargs)"
+expect "[external] every policy is ingress+egress (default deny both ways)" 0 "$(q "[$NP | select((.spec.policyTypes | sort | join(\",\")) != \"Egress,Ingress\")] | length" external)"
+expect "[external] internet (0.0.0.0/0 except the six private ranges, TCP 443) only for auth, frontend, scrapers" "auth frontend scrapers" "$(q "$NP | select(.spec.egress[] | .to[]? | select(has(\"ipBlock\"))) | .metadata.labels.\"app.kubernetes.io/component\"" external | sort -u | xargs)"
+expect "[external] the internet rule" "0.0.0.0/0 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10,127.0.0.0/8 443 TCP" "$(q "$(npc auth) | .spec.egress[] | select(.to[]? | has(\"ipBlock\")) | .to[0].ipBlock.cidr + \" \" + (.to[0].ipBlock.except | join(\",\")) + \" \" + (.ports[0].port | tostring) + \" \" + .ports[0].protocol" external)"
+# (one policy at a time: yq mixes documents when an expression runs over several at once)
+ing=""; for c in auth backend frontend swagger background-services scrapers db-migration; do
+  ing="$ing $(q "$(npc $c) | .spec.ingress | map(select(.from[].namespaceSelector.matchLabels.\"kubernetes.io/metadata.name\" == \"traefik\")) | .[].ports[0].port | \"$c:\" + tostring" external)"; done
+expect "[external] ingress controller (traefik) may reach exactly frontend:3000 backend:3500 auth:7000 (+swagger:8080 when enabled), nothing else" "auth:7000 backend:3500 frontend:3000 swagger:8080" "$(echo $ing | tr ' ' '\n' | grep . | sort | xargs)"
+dbe=""; nsel=0; for c in auth backend frontend swagger background-services scrapers db-migration; do
+  dbe="$dbe $(q "$(npc $c) | .spec.egress | map(select(.ports[0].port == 5432)) | .[].to[0].podSelector.matchLabels.\"cnpg.io/cluster\" | \"$c:\" + ." external)"
+  nsel=$((nsel + $(q "$(npc $c) | [.spec.egress[] | select(.ports[0].port == 5432) | select(.to[0] | has(\"namespaceSelector\"))] | length" external)))
+done
+expect "[external] database egress: CNPG pods of the same namespace (no namespaceSelector), 5432, from backend, background-services and the Job only" "backend:plant-commons-pg background-services:plant-commons-pg db-migration:plant-commons-pg 0" "$(echo $dbe | tr ' ' '\n' | grep . | sort | xargs) $nsel"
+expect "[external] DNS egress to kube-system/kube-dns UDP+TCP 53 in every policy" 7 "$(q "[$NP | select(.spec.egress[0].to[0].namespaceSelector.matchLabels.\"kubernetes.io/metadata.name\" == \"kube-system\" and .spec.egress[0].to[0].podSelector.matchLabels.\"k8s-app\" == \"kube-dns\" and (.spec.egress[0].ports | length) == 2)] | length" external)"
+expect "[external] background-services and the Job reach nothing but DNS and the database (2 egress rules each)" "2 2" "$(q "$(npc background-services) | .spec.egress | length" external | xargs) $(q "$(npc db-migration) | .spec.egress | length" external | xargs)"
+expect "[external] frontend egress: DNS, backend:3500, auth:7000, internet:443" "dns=1 internet=1 peers=backend:3500,auth:7000" "$(q "$(npc frontend) | \"dns=\" + (.spec.egress | map(select(.to[0].namespaceSelector)) | length | tostring) + \" internet=\" + (.spec.egress | map(select(.to[0].ipBlock)) | length | tostring) + \" peers=\" + (.spec.egress | map(select(.to[0].podSelector.matchLabels.\"app.kubernetes.io/component\") | .to[0].podSelector.matchLabels.\"app.kubernetes.io/component\" + \":\" + (.ports[0].port | tostring)) | join(\",\"))" external)"
+for c in auth scrapers; do
+  expect "[external] $c egress: DNS, backend:3500, internet:443" "dns=1 internet=1 peers=backend:3500" "$(q "$(npc $c) | \"dns=\" + (.spec.egress | map(select(.to[0].namespaceSelector)) | length | tostring) + \" internet=\" + (.spec.egress | map(select(.to[0].ipBlock)) | length | tostring) + \" peers=\" + (.spec.egress | map(select(.to[0].podSelector.matchLabels.\"app.kubernetes.io/component\") | .to[0].podSelector.matchLabels.\"app.kubernetes.io/component\" + \":\" + (.ports[0].port | tostring)) | join(\",\"))" external)"
+done
+expect "[external] backend and background-services may not reach the internet, auth or frontend" "0 0" "$(for c in backend background-services; do q "$(npc $c) | .spec.egress | map(select(.to[0].ipBlock or .to[0].podSelector.matchLabels.\"app.kubernetes.io/component\" == \"auth\" or .to[0].podSelector.matchLabels.\"app.kubernetes.io/component\" == \"frontend\")) | length" external; done | xargs)"
 
 # routing render
 expect "[routing] IngressRoute hosts and prefixes" 5 "$(q 'select(.kind == "IngressRoute") | .spec.routes | length' routing)"

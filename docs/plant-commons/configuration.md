@@ -42,6 +42,11 @@ CLAUDE.md should then be amended either way).
 
 ### database (`rsd/database`, PostgreSQL 17)
 
+> **Platform:** with `database.enabled=false` this section does not apply (no database pod). The connection settings come from `externalDatabase` and the CNPG/vault
+> Secrets instead (chart.md sections 2 and 3, database.md): backend `PGRST_DB_URI` with `sslmode=verify-full&sslrootcert=...`, background-services `POSTGRES_USER`/`POSTGRES_PASSWORD`
+> from the CNPG `-app` Secret plus the optional **`POSTGRES_DB_JDBC_PARAMS`** (PLANT-COMMONS, appended to the JDBC URL), `000-fill-authenticator-password.sh` is replaced by
+> `deploy/postgres/build-init-sql.sh`. The variables below are for upstream's image / the chart's own database.
+
 | Variable | Req. | Secret? | Production value | Source | What it does |
 |---|---|---|---|---|---|
 | `POSTGRES_DB` | yes | no | `rsd-db` | ConfigMap | Database name. Also sed-substituted into `001-setup-basic-roles.sql` by `000-fill-authenticator-password.sh`; keep it `[a-z0-9-]`. |
@@ -240,6 +245,8 @@ Further admins: Administration -> RSD users -> assign the administrator role (up
   ORCID outage, restart the auth pod and check `GET /auth/providers` returns the ORCID entry.
 
 ## 5. Secrets
+
+> **Platform:** `POSTGRES_PASSWORD` and `POSTGRES_AUTHENTICATOR_PASSWORD` are not in `existingSecret` with the external database; see chart.md section 3. The rest of this section applies to the chart's own database.
 
 - **Upstream restriction**: `.env.example` warns that special characters "might corrupt some
   processes". Concretely: `000-fill-authenticator-password.sh` substitutes the authenticator password into

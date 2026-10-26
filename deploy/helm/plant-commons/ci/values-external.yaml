@@ -1,0 +1,15 @@
+# PLANT-COMMONS: the target platform's shape (external CloudNativePG database, NetworkPolicies on) with the
+# optional parts switched on, only to render and lint in CI (together with values-ci.yaml). Obviously fake
+# inputs; never deploy with this file (examples/values-plant-commons.yaml is the deployable one).
+database:
+  enabled: false
+# externalDatabase, networkPolicy.egress.database/dns/internet: the chart defaults are the platform's values.
+scrapers:
+  enabled: true
+swagger:
+  enabled: true
+dbMigration:
+  enabled: true
+  configMapName: example-migration
+networkPolicy:
+  enabled: true

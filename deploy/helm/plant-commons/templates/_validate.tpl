@@ -41,6 +41,16 @@ is skipped (--skip-schema-validation) and give a clearer message for the securit
 {{- end -}}
 {{- end -}}
 
+{{- /* images: optional per-component digests */ -}}
+{{- range $c, $d := ($v.image.digests | default dict) -}}
+{{- if not (has $c (list "auth" "backend" "frontend" "background-services" "scrapers" "database")) -}}
+{{- fail (printf "image.digests.%s: unknown component (auth, backend, frontend, background-services, scrapers, database)." $c) -}}
+{{- end -}}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" (toString $d)) -}}
+{{- fail (printf "image.digests.%s=%q must look like sha256:<64 lowercase hex digits>." $c (toString $d)) -}}
+{{- end -}}
+{{- end -}}
+
 {{- /* images */ -}}
 {{- if or (not $v.image.namespace) (hasPrefix "CHANGE_ME" $v.image.namespace) -}}
 {{- fail "image.namespace is still the placeholder CHANGE_ME: set it to the path below the registry (e.g. <owner>/<repo>, see docs/plant-commons/images.md)." -}}
@@ -57,10 +67,13 @@ is skipped (--skip-schema-validation) and give a clearer message for the securit
 {{- fail "Set either secrets.create=true (local tests only) or existingSecret, not both." -}}
 {{- end -}}
 {{- if $v.secrets.create -}}
-{{- range $k, $val := $v.secrets.values -}}
-{{- if not $val -}}{{- fail (printf "secrets.create=true needs secrets.values.%s" $k) -}}{{- end -}}
+{{- /* PLANT-COMMONS: with the external database the two database passwords are not part of this Secret */ -}}
+{{- $needed := list "POSTGRES_PASSWORD" "POSTGRES_AUTHENTICATOR_PASSWORD" "PGRST_JWT_SECRET" "AUTH_ORCID_CLIENT_SECRET" -}}
+{{- if not $v.database.enabled -}}{{- $needed = list "PGRST_JWT_SECRET" "AUTH_ORCID_CLIENT_SECRET" -}}{{- end -}}
+{{- range $k := $needed -}}
+{{- if not (index $v.secrets.values $k) -}}{{- fail (printf "secrets.create=true needs secrets.values.%s" $k) -}}{{- end -}}
 {{- end -}}
-{{- range $k := list "POSTGRES_PASSWORD" "POSTGRES_AUTHENTICATOR_PASSWORD" "PGRST_JWT_SECRET" -}}
+{{- range $k := without $needed "AUTH_ORCID_CLIENT_SECRET" -}}
 {{- if not (regexMatch "^[A-Za-z0-9]+$" (toString (index $v.secrets.values $k))) -}}
 {{- fail (printf "secrets.values.%s must be [A-Za-z0-9] only (docs/plant-commons/configuration.md section 5)." $k) -}}
 {{- end -}}
@@ -74,6 +87,28 @@ is skipped (--skip-schema-validation) and give a clearer message for the securit
 {{- /* database */ -}}
 {{- if not (regexMatch "^[a-z0-9-]+$" (toString $v.database.name)) -}}
 {{- fail "database.name must match [a-z0-9-]+ (it is sed-substituted into SQL at first init)." -}}
+{{- end -}}
+{{- /* PLANT-COMMONS: external database. TLS with verification is the only mode (the cluster rejects the rest). */ -}}
+{{- if not $v.database.enabled -}}
+{{- $e := $v.externalDatabase -}}
+{{- if not (has (toString $e.sslMode) (list "verify-full" "verify-ca")) -}}
+{{- fail (printf "externalDatabase.sslMode=%q is not allowed: verify-full or verify-ca only (the platform database rejects unencrypted connections and an unverified TLS connection is no protection)." (toString $e.sslMode)) -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$" (toString $e.host)) -}}
+{{- fail "externalDatabase.host must be a DNS name (e.g. plant-commons-pg-rw)." -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z0-9-]+$" (toString $e.name)) -}}
+{{- fail "externalDatabase.name must match [a-z0-9-]+." -}}
+{{- end -}}
+{{- if not (regexMatch "^[a-z_][a-z0-9_]*$" (toString $e.user)) -}}
+{{- fail "externalDatabase.user must be a role name ([a-z_][a-z0-9_]*)." -}}
+{{- end -}}
+{{- range $k, $name := dict "caSecret.name" $e.caSecret.name "caSecret.key" $e.caSecret.key "ownerSecret.name" $e.ownerSecret.name "ownerSecret.passwordKey" $e.ownerSecret.passwordKey "authenticatorSecret.name" $e.authenticatorSecret.name "authenticatorSecret.key" $e.authenticatorSecret.key -}}
+{{- if not $name -}}{{- fail (printf "externalDatabase.%s is required with database.enabled=false." $k) -}}{{- end -}}
+{{- end -}}
+{{- if and $v.secrets.create (or $v.secrets.values.POSTGRES_PASSWORD $v.secrets.values.POSTGRES_AUTHENTICATOR_PASSWORD) -}}
+{{- fail "secrets.values.POSTGRES_PASSWORD / POSTGRES_AUTHENTICATOR_PASSWORD are for database.enabled=true only; with the external database they come from externalDatabase.ownerSecret / authenticatorSecret." -}}
+{{- end -}}
 {{- end -}}
 
 {{- /* pod disruption budgets only make sense with >= 2 replicas (otherwise they block node drains) */ -}}
@@ -95,11 +130,14 @@ is skipped (--skip-schema-validation) and give a clearer message for the securit
 {{- fail "networkPolicy.enabled needs networkPolicy.ingressFrom (the ingress controller peers); default-deny ingress would otherwise cut the site off. See values.yaml." -}}
 {{- end -}}
 {{- if $v.networkPolicy.egress.enabled -}}
-{{- if not $v.networkPolicy.egress.orcid -}}
-{{- fail "networkPolicy.egress.enabled needs networkPolicy.egress.orcid (peers for orcid.org:443); the auth pod cannot log anyone in without it and discovery runs only once at start. Not guessed here, see values.yaml." -}}
+{{- if not $v.networkPolicy.egress.dns -}}
+{{- fail "networkPolicy.egress.enabled needs networkPolicy.egress.dns (CoreDNS peers): without DNS nothing resolves." -}}
 {{- end -}}
-{{- if and $v.scrapers.enabled (not $v.networkPolicy.egress.scrapers) -}}
-{{- fail "networkPolicy.egress.enabled with scrapers.enabled needs networkPolicy.egress.scrapers." -}}
+{{- if and (not $v.database.enabled) (not $v.networkPolicy.egress.database) -}}
+{{- fail "networkPolicy.egress.enabled with database.enabled=false needs networkPolicy.egress.database (peers of the external database pods, port 5432)." -}}
+{{- end -}}
+{{- if not $v.networkPolicy.egress.internet.cidr -}}
+{{- fail "networkPolicy.egress.internet.cidr is required (auth needs https to orcid.org)." -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}

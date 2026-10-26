@@ -42,6 +42,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "cpu",
             "memory"
           ],
           "properties": {
@@ -210,6 +211,26 @@
             "IfNotPresent",
             "Never"
           ]
+        },
+        "digests": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": {
+            "enum": [
+              "auth",
+              "backend",
+              "frontend",
+              "background-services",
+              "scrapers",
+              "database"
+            ]
+          },
+          "patternProperties": {
+            "^.*$": {
+              "type": "string",
+              "pattern": "^sha256:[a-f0-9]{64}$"
+            }
+          }
         }
       }
     },
@@ -333,6 +354,9 @@
               "minItems": 1
             }
           }
+        },
+        "enabled": {
+          "type": "boolean"
         }
       }
     },
@@ -608,6 +632,9 @@
         },
         "configMapKey": {
           "type": "string"
+        },
+        "resources": {
+          "$ref": "#/$defs/resources"
         }
       }
     },
@@ -631,11 +658,23 @@
             "dns": {
               "type": "array"
             },
-            "orcid": {
+            "database": {
               "type": "array"
             },
-            "scrapers": {
-              "type": "array"
+            "internet": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "cidr": {
+                  "type": "string"
+                },
+                "except": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         }
@@ -695,6 +734,104 @@
                   "type": "string"
                 }
               }
+            }
+          }
+        }
+      }
+    },
+    "externalDatabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "port",
+        "name",
+        "user",
+        "sslMode",
+        "caSecret",
+        "ownerSecret",
+        "authenticatorSecret"
+      ],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "sslMode": {
+          "enum": [
+            "verify-full",
+            "verify-ca"
+          ],
+          "description": "TLS with certificate verification only"
+        },
+        "caSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "ownerSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "passwordKey"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "usernameKey": {
+              "type": "string"
+            },
+            "passwordKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "authenticatorSecret": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "key"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }

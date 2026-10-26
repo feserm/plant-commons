@@ -46,10 +46,16 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 app.kubernetes.io/component: {{ .c }}
 {{- end -}}
 
-{{/* Image reference: pc.image (dict "ctx" $ "c" "auth") -> <registry>/<namespace>/plant-commons-auth:<tag> */}}
+{{/*
+Image reference: pc.image (dict "ctx" $ "c" "auth") -> <registry>/<namespace>/plant-commons-auth:<tag>[@<digest>]
+The optional per-component digest (image.digests.<c>) is appended; the tag is kept for readability, the digest is
+what the container runtime verifies.
+*/}}
 {{- define "pc.image" -}}
 {{- $i := .ctx.Values.image -}}
+{{- $d := get ($i.digests | default dict) .c -}}
 {{- printf "%s/%s/plant-commons-%s:%s" (required "image.registry is required" $i.registry) (required "image.namespace is required" $i.namespace) .c (required "image.tag is required (the sha-<short sha> tag of the CI build)" $i.tag) -}}
+{{- if $d }}@{{ $d }}{{ end -}}
 {{- end -}}
 
 {{/* https://<host>, no trailing slash. */}}
@@ -113,7 +119,7 @@ data:
 Container env: ConfigMap via envFrom, Secret keys one by one (least privilege: a pod only sees the keys
 it needs, never envFrom of the whole Secret), then literal chart-fixed variables. Order matters: Secret
 variables come BEFORE the literals so that `$(VAR)` references in a literal (PGRST_DB_URI) resolve.
-  pc.env (dict "ctx" $ "c" "auth" "config" true "secrets" (list ...) "optionalSecrets" (list ...) "env" (dict ...))
+  pc.env (dict "ctx" $ "c" "auth" "config" true "secrets" (list ...) "optionalSecrets" (list ...) "secretRefs" (list ...) "env" (dict ...))
 */}}
 {{- define "pc.env" -}}
 {{- if .config }}
@@ -121,7 +127,7 @@ envFrom:
   - configMapRef:
       name: {{ include "pc.configName" . }}
 {{- end }}
-{{- if or .secrets .optionalSecrets .env }}
+{{- if or .secrets .optionalSecrets .secretRefs .env }}
 env:
   {{- range .secrets }}
   - name: {{ . }}
@@ -137,6 +143,14 @@ env:
         name: {{ include "pc.secretName" $.ctx }}
         key: {{ . }}
         optional: true
+  {{- end }}
+  {{- /* PLANT-COMMONS: secretRefs = list of {name, secret, key} for Secrets that are NOT existingSecret (external database) */}}
+  {{- range .secretRefs }}
+  - name: {{ .name }}
+    valueFrom:
+      secretKeyRef:
+        name: {{ .secret | quote }}
+        key: {{ .key | quote }}
   {{- end }}
   {{- range $k, $v := .env }}
   - name: {{ $k }}
