@@ -1,0 +1,33 @@
+# PLANT-COMMONS: the cluster values the user gave (open questions answered). No secrets. Still needs
+# image.tag (sha-<short sha>) from the CI build:  helm ... -f this-file --set image.tag=sha-xxxxxxx
+# Create the Secret first (docs/plant-commons/chart.md section 3).
+image:
+  namespace: feserm/plant-commons
+existingSecret: plant-commons-secrets
+orcid:
+  clientId: APP-T1MHJINJKL8PTMXA   # production client, both redirect URIs registered (user, 2026-10-26)
+
+database:
+  persistence:
+    size: 10Gi
+    # Confirmed by the user: the database runs on `local-ephemeral` (`nfs-rwx` rejected). The class name suggests node-local,
+    # non-replicated storage, so keep a pg_dump backup plan (Phase 6) and expect the data to be tied to the node.
+    storageClass: local-ephemeral
+
+# Routing/TLS: one entry in the cluster-local service registry, OUTSIDE this chart. routing.enabled stays false.
+# The entry needs: host plant-commons.ipk-gatersleben.de; paths and targets in docs/plant-commons/routing.md
+# (frontend:3000, backend:3500 /api/v1 + /image, auth:7000 /auth + /api/v2).
+routing:
+  enabled: false
+
+# Ingress + egress policies, egress as "public HTTPS" instead of addresses. Needs the ingress controller's labels:
+# fill ingressFrom, then set enabled: true.
+networkPolicy:
+  enabled: false
+  ingressFrom: []   # TODO: the registry's ingress controller pods/namespace
+  egress:
+    enabled: true
+    orcid:
+      - ipBlock: {cidr: 0.0.0.0/0}   # any destination, TCP 443 only (the chart adds the port): broader than orcid.org alone
+    scrapers:
+      - ipBlock: {cidr: 0.0.0.0/0}

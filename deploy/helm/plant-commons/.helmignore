@@ -1,0 +1,9 @@
+# Patterns to ignore when building packages.
+.git
+.gitignore
+*.swp
+*.bak
+*.tmp
+# test tooling and examples are not part of a packaged chart
+ci/
+examples/

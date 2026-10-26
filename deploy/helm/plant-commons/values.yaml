@@ -1,0 +1,343 @@
+# PLANT-COMMONS: values for the Plant Commons chart. Placeholders only, never real secrets.
+# "Source" notes refer to docs/plant-commons/configuration.md (section 2) unless stated otherwise.
+# The full value reference is docs/plant-commons/chart.md.
+#
+# Minimum you must set for a real install (everything else has a default):
+#   image.tag, existingSecret, orcid.clientId
+# (helm lint / helm template fail with a clear message while they are missing.)
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Prefix for the Service names. Empty gives the short names used throughout the docs
+# (`database`, `backend`, `auth`, `frontend`), so the in-cluster URLs are `http://backend:3500`,
+# `http://auth:7000/auth`. Set a prefix only if a second release shares the namespace.
+serviceNamePrefix: ""
+
+# Public host name, no scheme, no path, no trailing slash. Fixed by CLAUDE.md.
+# Derives HOST_URL = https://<host> (auth, redirect URIs at ORCID), RSD_REVERSE_PROXY_URL (frontend),
+# the swagger API_URL and the routing host. A trailing slash in HOST_URL would break the ORCID
+# redirect URI (configuration.md section 4), which is why only a bare host name is accepted.
+host: plant-commons.ipk-gatersleben.de
+
+image:
+  # Images are public on ghcr.io (implementation.md question 16), so imagePullSecrets is empty.
+  registry: ghcr.io
+  # Path below the registry; images are <registry>/<namespace>/plant-commons-<service>:<tag>
+  # (deploy/build-images.sh, images.md section 2). Confirmed by the user: ghcr.io/feserm/plant-commons.
+  # The chart still refuses the placeholder CHANGE_ME.
+  namespace: feserm/plant-commons
+  # The `sha-<short sha>` tag from the CI build; the SAME tag for every service, so one value
+  # deploys a consistent set. Required. `latest` is refused.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Only for private registries (none needed for public ghcr.io images).
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------------------------
+# Secrets. Never in git. Name of an EXISTING Secret in the release namespace with these keys
+# (key name = variable name, configuration.md section 5), values [A-Za-z0-9] only
+# (generate with `openssl rand -hex 32`):
+#   POSTGRES_PASSWORD, POSTGRES_AUTHENTICATOR_PASSWORD, PGRST_JWT_SECRET, AUTH_ORCID_CLIENT_SECRET
+# Optional scraper keys (only read when scrapers.enabled): API_CREDENTIALS_GITHUB,
+# ZENODO_ACCESS_TOKEN, OPENALEX_API_KEY, LIBRARIES_IO_ACCESS_TOKEN
+existingSecret: ""
+
+secrets:
+  # !!! LOCAL KIND/SMOKE TESTS ONLY !!! `true` renders a Secret from `values` below, which puts the
+  # secret values into Helm release history (a Secret in the cluster, readable by anyone who can read
+  # release secrets) and into your values files. NEVER use it for the real deployment; create the
+  # Secret out of band and set existingSecret.
+  create: false
+  # Only read when create=true. Obviously fake values belong in examples/values-kind.yaml, not here.
+  values:
+    POSTGRES_PASSWORD: ""
+    POSTGRES_AUTHENTICATOR_PASSWORD: ""
+    PGRST_JWT_SECRET: ""
+    AUTH_ORCID_CLIENT_SECRET: ""
+
+# ---------------------------------------------------------------------------------------------
+orcid:
+  # Client id of the PRODUCTION ORCID client (APP-XXXXXXXXXXXXXXXX), public. Required.
+  # Source: ConfigMap ORCID_CLIENT_ID (auth). Open questions 5, 14.
+  clientId: ""
+  # Source: ConfigMap ORCID_WELL_KNOWN_URL. Production, not sandbox (configuration.md section 6).
+  wellKnownUrl: https://orcid.org/.well-known/openid-configuration
+
+# In-cluster URLs. Empty = derived from the Service names (with the default serviceNamePrefix these are
+# the documented values).
+urls:
+  # POSTGREST_URL, default http://backend:3500 (configuration.md section 1)
+  postgrest: ""
+
+# ---------------------------------------------------------------------------------------------
+# Common pod placement for all pods
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------------------------
+database:
+  # POSTGRES_DB (ConfigMap). Keep [a-z0-9-]: it is sed-substituted into SQL at first init.
+  name: rsd-db
+  # POSTGRES_USER (ConfigMap), superuser role, also used by background-services.
+  user: rsd
+  persistence:
+    # PVC created by the StatefulSet volumeClaimTemplate and mounted at /var/lib/postgresql/data.
+    # Size is a placeholder estimate; open question 7. Not shrinkable.
+    size: 10Gi
+    # Empty = the cluster's default StorageClass (open question 7). "-" is NOT special here.
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  # Postgres' stop signal in the image is SIGINT, but Kubernetes may send SIGTERM; a preStop
+  # `pg_ctl stop -m fast` makes the shutdown fast and clean either way (templates/database.yaml).
+  terminationGracePeriodSeconds: 120
+  # Not measured; starting estimates to be tuned in Phase 6.
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {memory: 1Gi}
+  # Runs as postgres (uid 999) from the start; fsGroup 999 makes the PVC writable (images.md section 6).
+  # readOnlyRootFilesystem stays false: the init script 000-fill-authenticator-password.sh runs
+  # `sed --in-place` inside /docker-entrypoint-initdb.d (root filesystem).
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities: {drop: [ALL]}
+
+backend:
+  replicas: 1 # stateless (verified: no local state), 2 is possible; open question
+  # Source: ConfigMap PGRST_DB_ANON_ROLE / PGRST_DB_SCHEMA / PGRST_SERVER_PORT / PGRST_ADMIN_SERVER_PORT
+  dbAnonRole: rsd_web_anon
+  dbSchema: public
+  port: 3500
+  adminPort: 3501 # /ready and /live; never routed publicly
+  # Chart-fixed in the pod spec (configuration.md "chart" rows): PGRST_DB_POOL, PGRST_DB_POOL_ACQUISITION_TIMEOUT.
+  dbPool: 30
+  dbPoolAcquisitionTimeout: 30
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  terminationGracePeriodSeconds: 30
+  podDisruptionBudget: {enabled: false, minAvailable: 1} # only with replicas >= 2
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: {drop: [ALL]}
+
+auth:
+  replicas: 1 # stateless as far as the code shows, but kept at 1 (open question)
+  # RSD_AUTH_PROVIDERS (ConfigMap). ORCID only. The chart REFUSES anything containing LOCAL and any
+  # other provider. ORCID:INVITE_ONLY (recommended, open question 10) or ORCID:EVERYONE.
+  providers: "ORCID:INVITE_ONLY"
+  # RSD_ENVIRONMENT (ConfigMap). The chart refuses `dev` (first login becomes admin).
+  environment: prod
+  # RSD_API_ACCESS_TOKEN_ENABLED (ConfigMap): /auth/accesstoken and the /api/v2 proxy.
+  apiAccessTokenEnabled: true
+  # RSD_AUTH_URL for the frontend (ConfigMap, configuration.md section 1, open question 9). Empty =
+  # http://<auth service>:7000/auth. The public alternative would be https://<host>/auth.
+  rsdAuthUrl: ""
+  # Exec-form command (container `args`, NOT `command`: keeps the image's cacert ENTRYPOINT and makes the
+  # JVM PID 1 so SIGTERM works; images.md section 6.1). Never the compose JDWP entrypoint.
+  args: [java, -cp, auth.jar, nl.esciencecenter.rsd.authentication.Main]
+  # JAVA_TOOL_OPTIONS: sizes the heap from the container memory limit without editing the image.
+  # The JVM default is 25% of the limit, too little for a small limit.
+  javaToolOptions: "-XX:MaxRAMPercentage=70.0"
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  terminationGracePeriodSeconds: 30
+  podDisruptionBudget: {enabled: false, minAvailable: 1}
+  # Not measured; starting estimates. Heap = 70% of 768Mi (~537Mi), rest for metaspace/threads.
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {memory: 768Mi}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true # with an emptyDir at /tmp (tested, images.md section 6)
+    capabilities: {drop: [ALL]}
+
+frontend:
+  replicas: 1 # stateless (verified: no local state, JWT cookie), 2 is possible; open question
+  # Optional (ConfigMap, only emitted when non-empty): CROSSREF_CONTACT_EMAIL, MATOMO_URL + MATOMO_ID.
+  crossrefContactEmail: ""
+  matomoUrl: ""
+  matomoId: ""
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxSurge: 1, maxUnavailable: 0}
+  terminationGracePeriodSeconds: 30
+  podDisruptionBudget: {enabled: false, minAvailable: 1}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    runAsGroup: 65534
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true # emptyDirs at /tmp and /app/.next/cache (measured: needed, see chart.md)
+    capabilities: {drop: [ALL]}
+
+backgroundServices:
+  # Exactly one: it refreshes a materialized view every 5 minutes. Not configurable, no replicas value.
+  args: [java, -cp, background-services.jar, nl.esciencecenter.rsd.Main]
+  javaToolOptions: "-XX:MaxRAMPercentage=70.0"
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests: {cpu: 50m, memory: 256Mi}
+    limits: {memory: 512Mi}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: {drop: [ALL]}
+
+# ---------------------------------------------------------------------------------------------
+# Optional services, all off by default.
+scrapers:
+  # A single Deployment running `cron -f` (NOT a CronJob, services.md). Needs egress to GitHub/GitLab/
+  # Zenodo/Crossref/OpenAlex/ROR. Open question 12 (who provides the tokens).
+  enabled: false
+  # ConfigMap MAX_REQUESTS_* (default 6 in the code), ENABLE_* must stay "false" (NLeSC only).
+  maxRequests:
+    GITHUB: 6
+    GITLAB: 6
+    4TU: 6
+    CODEBERG: 6
+    DOI: 6
+    OPENALEX: 6
+    ROR: 6
+  crossrefContactEmail: ""
+  terminationGracePeriodSeconds: 30
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 768Mi}
+  # cron needs root and writes /etc/environment, so no non-root and no readOnlyRootFilesystem. Measured
+  # (docker, --cap-drop ALL): cron only runs its jobs with SETUID and SETGID added back.
+  podSecurityContext:
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities: {drop: [ALL], add: [SETUID, SETGID]}
+
+swagger:
+  # Interactive API browser at /swagger/, only reachable if routing.enabled. Upstream image, as in compose.
+  enabled: false
+  image: swaggerapi/swagger-ui:v5.32.6
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  # The image entrypoint rewrites files under /usr/share/nginx/html and /etc/nginx at start, so it needs
+  # a writable root filesystem and root; measured (docker): CHOWN, SETUID, SETGID are enough.
+  podSecurityContext:
+    seccompProfile: {type: RuntimeDefault}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities: {drop: [ALL], add: [CHOWN, SETUID, SETGID]}
+
+# Not implemented, by decision: codemeta, mail stack (rabbitmq, mail, publisher), documentation.
+
+# ---------------------------------------------------------------------------------------------
+# Optional database upgrade Job: STUB, UNTESTED, off. Runs a SQL file YOU supply in a ConfigMap
+# (e.g. upstream's migration SQL for the release) through psql as the superuser. See README.
+dbMigration:
+  enabled: false
+  # Suffix of the Job name; change it for every run (Jobs are immutable).
+  name: manual
+  # Existing ConfigMap in the namespace and the key holding the SQL.
+  configMapName: ""
+  configMapKey: migration.sql
+
+# ---------------------------------------------------------------------------------------------
+# Optional NetworkPolicies, default off (open question 15). Requires a CNI that enforces them.
+networkPolicy:
+  enabled: false
+  # Peers (NetworkPolicyPeer list) allowed to reach frontend, backend, auth (and swagger): your ingress
+  # controller's pods, cluster specific, e.g.
+  #   - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: <traefik namespace>}}
+  #     podSelector: {matchLabels: {app.kubernetes.io/name: traefik}}
+  # Required when enabled (the default-deny ingress would otherwise take the site offline).
+  ingressFrom: []
+  egress:
+    # Also restrict egress (default-deny egress + allow rules). Off by default: needs the two lists below.
+    enabled: false
+    # Peers for DNS, standard form for CoreDNS shown; adjust to your cluster.
+    dns:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: kube-system}}
+        podSelector: {matchLabels: {k8s-app: kube-dns}}
+    # Required when egress.enabled: `to` entries (NetworkPolicyPeer list) for orcid.org:443 from the auth pod.
+    # Plain NetworkPolicy cannot match host names, so this needs CIDRs (changeable by ORCID) or a
+    # CNI specific FQDN policy (Cilium/Calico); NOT guessed here. Shape:
+    #   - ipBlock: {cidr: <ORCID address range>/32}
+    orcid: []
+    # Same for the scrapers (only used when scrapers.enabled): GitHub, GitLab, Zenodo, Crossref, ...
+    scrapers: []
+
+# ---------------------------------------------------------------------------------------------
+# Routing and TLS: OPTIONAL, OFF, BLOCKED on open questions 3 and 13. Rendered by templates/routing.yaml
+# from the Traefik-neutral spec in docs/plant-commons/routing.md, as Traefik IngressRoute + Middleware
+# and a cert-manager Certificate. Nothing below is an invented scheme: every cluster specific input
+# is a value without default.
+#
+# The six inputs routing.md says are still missing (answers decide how/whether this file is used):
+#   1. Mechanism: Traefik IngressRoute (this file) vs Ingress vs Gateway API HTTPRoute vs routes
+#      generated by the "service registry" from labels/annotations on the Service.
+#   2. The registry's annotation/label scheme (host, path prefix, middlewares, different backend per
+#      prefix on one host). Until known, use routing.annotations / routing.labels below.
+#   3. Middleware ownership: may the chart create Middleware objects in its namespace (this file
+#      does) or must they be cluster provided / cross-namespace?
+#   4. cert-manager: (Cluster)Issuer name, challenge type, and whether the registry creates the
+#      Certificate or the chart must (this file does, routing.certificate).
+#   5. Entrypoint names, global HTTP->HTTPS redirect, Traefik version (apiVersion below).
+#   6. Namespace and NetworkPolicy defaults (default-deny egress blocks auth -> orcid.org).
+routing:
+  enabled: false
+  # traefik.io/v1alpha1 for Traefik >= 2.10; traefik.containo.us/v1alpha1 for older. Input 5.
+  apiVersion: traefik.io/v1alpha1
+  # Entrypoints (names in the Traefik static config), e.g. [websecure]. Required when enabled. Input 5.
+  entryPoints: []
+  # Extra annotations/labels for the IngressRoute and Certificate, e.g. for a service registry. Input 2.
+  annotations: {}
+  labels: {}
+  # Request body cap for /api/v1 and /api/v2 (Buffering middleware), 40M like nginx. 0 = no cap.
+  # Open question 13 (proposed: keep).
+  maxRequestBodyBytes: 41943040
+  tls:
+    # Secret created by cert-manager and used by the IngressRoute. Empty = <fullname>-tls.
+    secretName: ""
+  certificate:
+    enabled: true
+    # Required when enabled. Input 4.
+    issuerRef:
+      name: ""
+      kind: ClusterIssuer
+      group: cert-manager.io

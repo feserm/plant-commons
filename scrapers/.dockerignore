@@ -1,0 +1,7 @@
+# PLANT-COMMONS: this directory has no upstream .dockerignore. Keep local build output and
+# env files out of the build context (the Dockerfile only copies selected paths today).
+target
+.env*
+!.env*.example
+.idea
+*.iml

@@ -1,0 +1,20 @@
+{{- $c := "frontend" }}
+{{- $v := .Values.frontend }}
+{{- $cfg := include "pc.config.frontend" . | fromYaml }}
+{{- /* /api/fe is a static JSON endpoint (no database, no auth) in the image. */}}
+{{- $probes := dict
+    "startupProbe" (dict "httpGet" (dict "path" "/api/fe" "port" "http") "periodSeconds" 3 "failureThreshold" 30)
+    "readinessProbe" (dict "httpGet" (dict "path" "/api/fe" "port" "http") "periodSeconds" 10 "failureThreshold" 3)
+    "livenessProbe" (dict "httpGet" (dict "path" "/api/fe" "port" "http") "periodSeconds" 20 "failureThreshold" 3) }}
+{{- /* emptyDir /tmp, and /app/.next/cache: with a read-only root filesystem Next.js' image optimizer
+       fails with "unhandledRejection ... mkdir '/app/.next/cache'" (measured). */}}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
+  "ports" (list (dict "name" "http" "port" 3000))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true "secrets" (list "PGRST_JWT_SECRET")))
+  "probes" $probes "emptyDirs" (list "/tmp" "/app/.next/cache") "replicas" $v.replicas "strategy" $v.strategy }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.service" (dict "ctx" . "c" $c "ports" (list (dict "name" "http" "port" 3000))) }}
+---
+{{ include "pc.deployment" $spec }}

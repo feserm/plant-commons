@@ -1,0 +1,16 @@
+# PLANT-COMMONS: chart for the Plant Commons deployment of RSD-as-a-service.
+# See docs/plant-commons/chart.md.
+apiVersion: v2
+name: plant-commons
+description: Plant Commons (customised Research Software Directory) for IPK Gatersleben
+type: application
+version: 0.1.0
+# The upstream RSD release the images are built from (UPSTREAM.md). Informational only: the images
+# deployed are selected by image.tag.
+appVersion: "6.7.4"
+home: https://plant-commons.ipk-gatersleben.de
+sources:
+  - https://github.com/research-software-directory/RSD-as-a-service
+keywords:
+  - rsd
+  - research-software-directory

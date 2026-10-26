@@ -1,0 +1,726 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "plant-commons values",
+  "type": "object",
+  "$defs": {
+    "quantity": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?(m|k|M|G|T|P|E|Ki|Mi|Gi|Ti|Pi|Ei)?$"
+        },
+        {
+          "type": "number",
+          "minimum": 0
+        }
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "limits"
+      ],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory"
+          ],
+          "properties": {
+            "cpu": {
+              "$ref": "#/$defs/quantity"
+            },
+            "memory": {
+              "$ref": "#/$defs/quantity"
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "memory"
+          ],
+          "properties": {
+            "cpu": {
+              "$ref": "#/$defs/quantity"
+            },
+            "memory": {
+              "$ref": "#/$defs/quantity"
+            }
+          }
+        }
+      }
+    },
+    "securityContext": {
+      "type": "object",
+      "required": [
+        "allowPrivilegeEscalation",
+        "capabilities"
+      ],
+      "properties": {
+        "allowPrivilegeEscalation": {
+          "const": false
+        },
+        "privileged": {
+          "const": false
+        },
+        "capabilities": {
+          "type": "object",
+          "required": [
+            "drop"
+          ],
+          "properties": {
+            "drop": {
+              "type": "array",
+              "contains": {
+                "const": "ALL"
+              }
+            }
+          }
+        }
+      }
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "required": [
+        "seccompProfile"
+      ],
+      "properties": {
+        "seccompProfile": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "RuntimeDefault",
+                "Localhost"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "strategy": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "RollingUpdate",
+            "Recreate"
+          ]
+        }
+      }
+    },
+    "pdb": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "minAvailable"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "type": [
+            "integer",
+            "string"
+          ]
+        }
+      }
+    },
+    "javaOpts": {
+      "type": "string",
+      "not": {
+        "pattern": "(?i)jdwp"
+      }
+    },
+    "args": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "not": {
+          "pattern": "(?i)jdwp|5005"
+        }
+      }
+    }
+  },
+  "required": [
+    "host",
+    "image",
+    "existingSecret",
+    "orcid",
+    "auth"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "serviceNamePrefix": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([a-z0-9-]*[a-z0-9])?-)?$"
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "bare host name: no scheme, no path, no trailing slash",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$"
+    },
+    "image": {
+      "type": "object",
+      "required": [
+        "registry",
+        "namespace",
+        "tag"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "registry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "const": "latest"
+          }
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array"
+    },
+    "existingSecret": {
+      "type": "string"
+    },
+    "secrets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "type": "boolean"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "POSTGRES_PASSWORD": {
+              "type": "string"
+            },
+            "POSTGRES_AUTHENTICATOR_PASSWORD": {
+              "type": "string"
+            },
+            "PGRST_JWT_SECRET": {
+              "type": "string"
+            },
+            "AUTH_ORCID_CLIENT_SECRET": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "orcid": {
+      "type": "object",
+      "required": [
+        "clientId",
+        "wellKnownUrl"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "pattern": "^APP-[0-9A-Z]{16}$"
+        },
+        "wellKnownUrl": {
+          "type": "string",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "urls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "postgrest": {
+          "type": "string"
+        }
+      }
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "database": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "name",
+        "user",
+        "persistence"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+$"
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "persistence": {
+          "type": "object",
+          "required": [
+            "size",
+            "accessModes"
+          ],
+          "properties": {
+            "size": {
+              "type": "string",
+              "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?$"
+            },
+            "storageClass": {
+              "type": "string"
+            },
+            "accessModes": {
+              "type": "array",
+              "minItems": 1
+            }
+          }
+        }
+      }
+    },
+    "backend": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "replicas"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "dbAnonRole": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dbSchema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer"
+        },
+        "adminPort": {
+          "type": "integer"
+        },
+        "dbPool": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "dbPoolAcquisitionTimeout": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "strategy": {
+          "$ref": "#/$defs/strategy"
+        },
+        "podDisruptionBudget": {
+          "$ref": "#/$defs/pdb"
+        }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "replicas",
+        "providers",
+        "environment"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "providers": {
+          "type": "string",
+          "description": "ORCID only: ORCID:INVITE_ONLY or ORCID:EVERYONE",
+          "pattern": "^ORCID:(INVITE_ONLY|EVERYONE)$"
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "pattern": "^(?i:dev)$"
+          }
+        },
+        "apiAccessTokenEnabled": {
+          "type": "boolean"
+        },
+        "rsdAuthUrl": {
+          "type": "string"
+        },
+        "args": {
+          "$ref": "#/$defs/args"
+        },
+        "javaToolOptions": {
+          "$ref": "#/$defs/javaOpts"
+        },
+        "strategy": {
+          "$ref": "#/$defs/strategy"
+        },
+        "podDisruptionBudget": {
+          "$ref": "#/$defs/pdb"
+        }
+      }
+    },
+    "frontend": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "replicas"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "crossrefContactEmail": {
+          "type": "string"
+        },
+        "matomoUrl": {
+          "type": "string"
+        },
+        "matomoId": {
+          "type": "string"
+        },
+        "strategy": {
+          "$ref": "#/$defs/strategy"
+        },
+        "podDisruptionBudget": {
+          "$ref": "#/$defs/pdb"
+        }
+      }
+    },
+    "backgroundServices": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "args": {
+          "$ref": "#/$defs/args"
+        },
+        "javaToolOptions": {
+          "$ref": "#/$defs/javaOpts"
+        }
+      }
+    },
+    "scrapers": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "enabled"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxRequests": {
+          "type": "object"
+        },
+        "crossrefContactEmail": {
+          "type": "string"
+        }
+      }
+    },
+    "swagger": {
+      "type": "object",
+      "required": [
+        "resources",
+        "securityContext",
+        "podSecurityContext",
+        "enabled",
+        "image"
+      ],
+      "properties": {
+        "resources": {
+          "$ref": "#/$defs/resources"
+        },
+        "securityContext": {
+          "$ref": "#/$defs/securityContext"
+        },
+        "podSecurityContext": {
+          "$ref": "#/$defs/podSecurityContext"
+        },
+        "terminationGracePeriodSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "dbMigration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        },
+        "configMapName": {
+          "type": "string"
+        },
+        "configMapKey": {
+          "type": "string"
+        }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "ingressFrom": {
+          "type": "array"
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "dns": {
+              "type": "array"
+            },
+            "orcid": {
+              "type": "array"
+            },
+            "scrapers": {
+              "type": "array"
+            }
+          }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "apiVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entryPoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "annotations": {
+          "type": "object"
+        },
+        "labels": {
+          "type": "object"
+        },
+        "maxRequestBodyBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "secretName": {
+              "type": "string"
+            }
+          }
+        },
+        "certificate": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "issuerRef": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "group": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "secrets": {
+            "properties": {
+              "create": {
+                "const": false
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "existingSecret": {
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ]
+}

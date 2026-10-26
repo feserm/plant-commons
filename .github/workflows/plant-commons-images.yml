@@ -1,0 +1,92 @@
+# PLANT-COMMONS: ALTERNATIVE A of two CI skeletons (the other is /.gitlab-ci.yml).
+# Keep the one for the platform that hosts the repo and delete the other.
+# All logic lives in deploy/build-images.sh; this file only sets up docker, logs in and calls it.
+# Documentation: docs/plant-commons/images.md
+#
+# Needs (names only, see docs/plant-commons/images.md):
+#   repository variables: IMAGE_REGISTRY, IMAGE_NAMESPACE (optional: IMAGE_BUILD_ARGS)
+#   repository secrets:   REGISTRY_USER, REGISTRY_PASSWORD
+name: plant-commons-images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"] # PLANT-COMMONS: adjust to the release tag pattern
+  pull_request: # build only, nothing is pushed
+  workflow_dispatch:
+
+concurrency:
+  group: plant-commons-images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write # PLANT-COMMONS: push to ghcr.io with the built-in GITHUB_TOKEN
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+      IMAGE_NAMESPACE: ${{ vars.IMAGE_NAMESPACE || github.repository }}
+      IMAGE_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+      GIT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      IMAGES_FILE: images.txt
+      # Registry layer cache. Pushes write the cache, pull requests only read it.
+      BUILD_CACHE_FROM: type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ vars.IMAGE_NAMESPACE || github.repository }}/plant-commons-{service}:buildcache
+    steps:
+      # Pin third-party actions to commit SHAs before the first real run (not verifiable offline).
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3 # docker-container builder: needed for the registry cache
+
+      - name: Log in to the registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USER || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
+      - name: Build (pull request)
+        if: github.event_name == 'pull_request'
+        run: ./deploy/build-images.sh ${{ vars.IMAGE_BUILD_ARGS }}
+
+      - name: Build and push (main, tags, manual runs)
+        if: github.event_name != 'pull_request'
+        env:
+          BUILD_CACHE_TO: type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ vars.IMAGE_NAMESPACE || github.repository }}/plant-commons-{service}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+        run: ./deploy/build-images.sh --push ${{ vars.IMAGE_BUILD_ARGS }}
+
+      # PLANT-COMMONS, optional, NOT enabled: vulnerability scan of the images built above.
+      # Needs the images in the local daemon (pull request path) or a pull of the pushed tags,
+      # and network access to Trivy's vulnerability database. Uncomment to try.
+      # - name: Scan images (Trivy)
+      #   run: |
+      #     while read -r svc image; do
+      #       docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+      #         aquasec/trivy:0.58.0 image --severity HIGH,CRITICAL --exit-code 1 --ignore-unfixed "$image"
+      #     done < images.txt
+
+  # PLANT-COMMONS, Phase 5: chart checks. No cluster and no secrets needed: helm lint/template with the fake
+  # values in ci/values-ci.yaml, negative tests and assertions (deploy/helm/plant-commons/ci/check.sh).
+  chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # yq (mikefarah v4) through its image, the same one the script was developed with
+      YQ: docker run --rm -i -v ${{ github.workspace }}:/w:ro -w /w mikefarah/yq:4.44.3
+    steps:
+      # Pin third-party actions to commit SHAs before the first real run (not verifiable offline).
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.2
+      - run: deploy/helm/plant-commons/ci/check.sh
+      # Optional, NOT enabled: schema validation of the rendered manifests. kubeconform has no bundled schemas
+      # (verified: it downloads them from raw.githubusercontent.com and fails offline), so it needs network access
+      # in CI. Uncomment to try; CRD objects (Traefik, cert-manager) are skipped by -ignore-missing-schemas.
+      # - run: |
+      #     helm template plant-commons deploy/helm/plant-commons -f deploy/helm/plant-commons/ci/values-ci.yaml \
+      #       | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 -strict -ignore-missing-schemas -summary -

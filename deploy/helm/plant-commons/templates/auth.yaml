@@ -1,0 +1,21 @@
+{{- $c := "auth" }}
+{{- $v := .Values.auth }}
+{{- $cfg := include "pc.config.auth" . | fromYaml }}
+{{- $env := dict }}
+{{- if $v.javaToolOptions }}{{- $_ := set $env "JAVA_TOOL_OPTIONS" $v.javaToolOptions }}{{- end }}
+{{- /* /auth/ is up regardless of ORCID discovery (services.md): check GET /auth/providers after a rollout. */}}
+{{- $probes := dict
+    "startupProbe" (dict "httpGet" (dict "path" "/auth/" "port" "http") "periodSeconds" 5 "failureThreshold" 24)
+    "readinessProbe" (dict "httpGet" (dict "path" "/auth/" "port" "http") "periodSeconds" 10 "failureThreshold" 3)
+    "livenessProbe" (dict "httpGet" (dict "path" "/auth/" "port" "http") "periodSeconds" 20 "failureThreshold" 3) }}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
+  "args" $v.args "ports" (list (dict "name" "http" "port" 7000))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true
+      "secrets" (list "AUTH_ORCID_CLIENT_SECRET" "PGRST_JWT_SECRET") "env" $env))
+  "probes" $probes "emptyDirs" (list "/tmp") "replicas" $v.replicas "strategy" $v.strategy }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.service" (dict "ctx" . "c" $c "ports" (list (dict "name" "http" "port" 7000))) }}
+---
+{{ include "pc.deployment" $spec }}

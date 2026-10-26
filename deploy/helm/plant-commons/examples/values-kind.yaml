@@ -1,0 +1,54 @@
+# PLANT-COMMONS: values for a LOCAL kind smoke test. NOT a deployment: obviously fake secrets, tiny
+# resources, no routing. Use: helm template/install ... -f examples/values-kind.yaml (see chart.md,
+# "Local kind smoke test"; nothing in this repo runs it for you).
+#
+# Images: the ones deploy/build-images.sh builds locally (registry.invalid/plant-commons/plant-commons-<svc>),
+# loaded into the kind nodes with `kind load docker-image` (never pulled, hence IfNotPresent; the tag is the
+# `sha-<short sha>[-dirty]` tag of YOUR local build, adjust it).
+image:
+  registry: registry.invalid
+  namespace: plant-commons
+  tag: sha-6786371-dirty
+  pullPolicy: IfNotPresent
+
+host: plant-commons.invalid
+
+# LOCAL is forbidden by the chart even here, so this uses ORCID with a dummy client: the pods start, but a
+# real login is impossible (ORCID rejects the dummy client; the sandbox/prod redirect URIs do not point here).
+orcid:
+  clientId: APP-0000000000000000
+
+# FAKE values, kind only. [A-Za-z0-9] only, JWT secret >= 32 characters.
+secrets:
+  create: true
+  values:
+    POSTGRES_PASSWORD: kindfakepostgrespassword0000
+    POSTGRES_AUTHENTICATOR_PASSWORD: kindfakeauthenticatorpassword0000
+    PGRST_JWT_SECRET: kindfakejwtsecretkindfakejwtsecret0000
+    AUTH_ORCID_CLIENT_SECRET: kindfakeorcidsecret0000
+
+routing:
+  enabled: false
+
+database:
+  persistence:
+    size: 1Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+backend:
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}
+auth:
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}
+frontend:
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+backgroundServices:
+  resources:
+    requests: {cpu: 20m, memory: 128Mi}
+    limits: {memory: 384Mi}

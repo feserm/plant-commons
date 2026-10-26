@@ -1,0 +1,17 @@
+{{- range $c := list "frontend" "backend" "auth" }}
+{{- $v := index $.Values $c }}
+{{- if $v.podDisruptionBudget.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "pc.name" (dict "ctx" $ "c" $c) }}
+  labels:
+    {{- include "pc.labels" (dict "ctx" $ "c" $c) | nindent 4 }}
+spec:
+  minAvailable: {{ $v.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "pc.selectorLabels" (dict "ctx" $ "c" $c) | nindent 6 }}
+{{- end }}
+{{- end }}

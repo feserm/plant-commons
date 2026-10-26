@@ -1,0 +1,17 @@
+{{- if .Values.swagger.enabled }}
+{{- $c := "swagger" }}
+{{- $v := .Values.swagger }}
+{{- $cfg := include "pc.config.swagger" . | fromYaml }}
+{{- $probe := dict "httpGet" (dict "path" "/" "port" "http") }}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" $v.image
+  "ports" (list (dict "name" "http" "port" 8080))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true "env" (dict "SUPPORTED_SUBMIT_METHODS" "[]")))
+  "probes" (dict "readinessProbe" (merge (dict "periodSeconds" 10) $probe) "livenessProbe" (merge (dict "periodSeconds" 20) $probe))
+  "replicas" 1 }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.service" (dict "ctx" . "c" $c "ports" (list (dict "name" "http" "port" 8080))) }}
+---
+{{ include "pc.deployment" $spec }}
+{{- end }}

@@ -1,0 +1,95 @@
+{{- /*
+OPTIONAL, OFF (routing.enabled=false). BLOCKED on open questions 3 and 13: how routes/certificates are
+generated at IPK ("service registry") is unknown, so this file is generated ONLY from the Traefik-neutral
+spec in docs/plant-commons/routing.md and invents nothing cluster specific: entrypoints, issuer, labels and
+annotations are values without defaults. Nothing else in the chart depends on this file or on the CRDs.
+Not rendered: /documentation (service not run, so the frontend's hard-coded /documentation/... links 404,
+open question 17) and /metadata/codemeta (service not implemented). Not implemented either: Compress and
+the Content-Location header handling (routing.md: optional / dropped).
+*/ -}}
+{{- if .Values.routing.enabled }}
+{{- $r := .Values.routing }}
+{{- $fn := include "pc.fullname" . }}
+{{- $host := .Values.host }}
+{{- $tlsSecret := default (printf "%s-tls" $fn) $r.tls.secretName }}
+{{- $common := dict "ctx" . "c" "routing" }}
+{{- $mw := dict "strip-api-v1" "/api/v1" "strip-image" "/image" "strip-swagger" "/swagger" }}
+{{- range $name, $prefix := $mw }}
+{{- if or (ne $name "strip-swagger") $.Values.swagger.enabled }}
+---
+apiVersion: {{ $r.apiVersion }}
+kind: Middleware
+metadata:
+  name: {{ $fn }}-{{ $name }}
+  {{- include "pc.routingMeta" $common | nindent 2 }}
+spec:
+  stripPrefix:
+    prefixes:
+      - {{ $prefix }}
+{{- end }}
+{{- end }}
+---
+apiVersion: {{ $r.apiVersion }}
+kind: Middleware
+metadata:
+  name: {{ $fn }}-image-accept
+  {{- include "pc.routingMeta" $common | nindent 2 }}
+spec:
+  headers:
+    customRequestHeaders:
+      Accept: application/octet-stream
+{{- if gt (int $r.maxRequestBodyBytes) 0 }}
+---
+apiVersion: {{ $r.apiVersion }}
+kind: Middleware
+metadata:
+  name: {{ $fn }}-body-limit
+  {{- include "pc.routingMeta" $common | nindent 2 }}
+spec:
+  buffering:
+    maxRequestBodyBytes: {{ int64 $r.maxRequestBodyBytes }}
+{{- end }}
+---
+apiVersion: {{ $r.apiVersion }}
+kind: IngressRoute
+metadata:
+  name: {{ $fn }}
+  {{- include "pc.routingMeta" $common | nindent 2 }}
+spec:
+  entryPoints:
+    {{- toYaml $r.entryPoints | nindent 4 }}
+  routes:
+    {{- $bodyLimit := ternary (list (printf "%s-body-limit" $fn)) (list) (gt (int $r.maxRequestBodyBytes) 0) }}
+    {{- /* row 1: /auth/, prefix kept */}}
+    {{- include "pc.route" (dict "host" $host "prefix" "/auth/" "svc" (include "pc.svc" (dict "ctx" . "c" "auth")) "port" 7000) | nindent 4 }}
+    {{- /* row 2: /api/v1/ -> backend, prefix stripped, 40M cap */}}
+    {{- include "pc.route" (dict "host" $host "prefix" "/api/v1/" "svc" (include "pc.svc" (dict "ctx" . "c" "backend")) "port" .Values.backend.port "middlewares" (concat (list (printf "%s-strip-api-v1" $fn)) $bodyLimit)) | nindent 4 }}
+    {{- /* row 3: /api/v2/ -> auth, prefix kept, 40M cap (only with the access-token API) */}}
+    {{- if .Values.auth.apiAccessTokenEnabled }}
+    {{- include "pc.route" (dict "host" $host "prefix" "/api/v2/" "svc" (include "pc.svc" (dict "ctx" . "c" "auth")) "port" 7000 "middlewares" $bodyLimit) | nindent 4 }}
+    {{- end }}
+    {{- /* row 4: /image/ -> backend, prefix stripped, Accept forced */}}
+    {{- include "pc.route" (dict "host" $host "prefix" "/image/" "svc" (include "pc.svc" (dict "ctx" . "c" "backend")) "port" .Values.backend.port "middlewares" (list (printf "%s-strip-image" $fn) (printf "%s-image-accept" $fn))) | nindent 4 }}
+    {{- /* row 6: /swagger/ (optional service) */}}
+    {{- if .Values.swagger.enabled }}
+    {{- include "pc.route" (dict "host" $host "prefix" "/swagger/" "svc" (include "pc.svc" (dict "ctx" . "c" "swagger")) "port" 8080 "middlewares" (list (printf "%s-strip-swagger" $fn))) | nindent 4 }}
+    {{- end }}
+    {{- /* row 8: / -> frontend */}}
+    {{- include "pc.route" (dict "host" $host "prefix" "/" "svc" (include "pc.svc" (dict "ctx" . "c" "frontend")) "port" 3000) | nindent 4 }}
+  tls:
+    secretName: {{ $tlsSecret }}
+{{- if $r.certificate.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $fn }}
+  {{- include "pc.routingMeta" $common | nindent 2 }}
+spec:
+  secretName: {{ $tlsSecret }}
+  dnsNames:
+    - {{ $host | quote }}
+  issuerRef:
+    {{- toYaml $r.certificate.issuerRef | nindent 4 }}
+{{- end }}
+{{- end }}

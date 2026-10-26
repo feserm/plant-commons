@@ -1,0 +1,31 @@
+{{- $c := "backend" }}
+{{- $v := .Values.backend }}
+{{- $cfg := include "pc.config.backend" . | fromYaml }}
+{{- $dbSvc := include "pc.svc" (dict "ctx" . "c" "database") }}
+{{- /* PGRST_DB_URI is assembled here with Kubernetes $(VAR) expansion from the Secret key
+       POSTGRES_AUTHENTICATOR_PASSWORD (declared earlier in env, see pc.env), so the password lives in exactly
+       one Secret key and cannot drift from the database's. Safe because the value is [A-Za-z0-9]. */}}
+{{- $env := dict
+    "PGRST_DB_URI" (printf "postgres://rsd_authenticator:$(POSTGRES_AUTHENTICATOR_PASSWORD)@%s:5432/%s" $dbSvc $.Values.database.name)
+    "PGRST_DB_PRE_REQUEST" "public.pre_request_hook"
+    "PGRST_SERVER_HOST" "0.0.0.0"
+    "PGRST_DB_POOL" $v.dbPool
+    "PGRST_DB_POOL_ACQUISITION_TIMEOUT" $v.dbPoolAcquisitionTimeout }}
+{{- /* Probes on the admin port: /live is 200 even when the database is down, /ready is 503 until it is
+       reachable (measured against a stopped database). PostgREST retries the database connection itself, so
+       no wait-for-database init container is needed; readiness keeps traffic away until it is up. */}}
+{{- $probes := dict
+    "startupProbe" (dict "httpGet" (dict "path" "/live" "port" "admin") "periodSeconds" 2 "failureThreshold" 30)
+    "readinessProbe" (dict "httpGet" (dict "path" "/ready" "port" "admin") "periodSeconds" 5 "failureThreshold" 3)
+    "livenessProbe" (dict "httpGet" (dict "path" "/live" "port" "admin") "periodSeconds" 10 "failureThreshold" 3) }}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
+  "ports" (list (dict "name" "http" "port" $v.port) (dict "name" "admin" "port" $v.adminPort))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true
+      "secrets" (list "POSTGRES_AUTHENTICATOR_PASSWORD" "PGRST_JWT_SECRET") "env" $env))
+  "probes" $probes "replicas" $v.replicas "strategy" $v.strategy }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.service" (dict "ctx" . "c" $c "ports" (list (dict "name" "http" "port" $v.port))) }}
+---
+{{ include "pc.deployment" $spec }}

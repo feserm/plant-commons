@@ -1,0 +1,2 @@
+{{- /* Renders nothing; only runs the guards (templates/_validate.tpl). */ -}}
+{{- include "pc.validate" . -}}

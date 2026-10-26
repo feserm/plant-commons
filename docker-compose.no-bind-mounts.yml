@@ -1,0 +1,9 @@
+# PLANT-COMMONS: local-only override for hosts where dockerd cannot bind-mount the repo
+# (e.g. home directory on NFS). Images already contain frontend/public and nginx.conf.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.no-bind-mounts.yml up --build -d
+services:
+  frontend:
+    volumes: !reset []
+  nginx:
+    volumes: !override
+      - lets-encrypt:/etc/letsencrypt

@@ -1,0 +1,52 @@
+{{- $c := "database" }}
+{{- $v := .Values.database }}
+{{- $cfg := include "pc.config.database" . | fromYaml }}
+{{- /* pg_isready over TCP (127.0.0.1), not the default unix socket: during first-start init the entrypoint
+       runs a temporary server that listens on the socket only, and a socket probe reports "accepting
+       connections" while the init scripts are still running (measured). */}}
+{{- $isready := dict "exec" (dict "command" (list "sh" "-c" "pg_isready -h 127.0.0.1 --username=\"$POSTGRES_USER\" --dbname=\"$POSTGRES_DB\"")) "timeoutSeconds" 5 }}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
+  "ports" (list (dict "name" "postgres" "port" 5432))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true
+      "secrets" (list "POSTGRES_PASSWORD" "POSTGRES_AUTHENTICATOR_PASSWORD")
+      "env" (dict "PGDATA" "/var/lib/postgresql/data/pgdata")))
+  "probes" (dict
+      "startupProbe" (merge (dict "periodSeconds" 5 "failureThreshold" 60) $isready)
+      "readinessProbe" (merge (dict "periodSeconds" 10 "failureThreshold" 3) $isready)
+      "livenessProbe" (merge (dict "periodSeconds" 20 "failureThreshold" 6) $isready))
+  "lifecycle" (dict "preStop" (dict "exec" (dict "command" (list "sh" "-c" "pg_ctl -D \"$PGDATA\" stop -m fast -t 90 || true"))))
+  "extraVolumeMounts" "- name: data\n  mountPath: /var/lib/postgresql/data" }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.service" (dict "ctx" . "c" $c "ports" (list (dict "name" "postgres" "port" 5432))) }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "pc.name" (dict "ctx" . "c" $c) }}
+  labels:
+    {{- include "pc.labels" (dict "ctx" . "c" $c) | nindent 4 }}
+spec:
+  serviceName: {{ include "pc.svc" (dict "ctx" . "c" $c) }}
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      {{- include "pc.selectorLabels" (dict "ctx" . "c" $c) | nindent 6 }}
+  template:
+    {{- include "pc.podTemplate" $spec | nindent 4 }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "pc.selectorLabels" (dict "ctx" . "c" $c) | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml $v.persistence.accessModes | nindent 10 }}
+        {{- with $v.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $v.persistence.size | quote }}

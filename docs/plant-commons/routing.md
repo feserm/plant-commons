@@ -1,0 +1,195 @@
+# Plant Commons: routing specification (Traefik-neutral)
+
+Derived from `nginx/nginx.conf` (RSD v6.7.4) and checked against the clients in `frontend/`,
+`authentication/`, `scrapers/`, `codemeta/`. This is a spec, **not** manifests: how routes and
+certificates are generated from the cluster's service registry is open question 3 (see the end of
+this file for what is needed to finish it).
+
+Single public host: `plant-commons.ipk-gatersleben.de`. Companion docs:
+[services.md](services.md), [configuration.md](configuration.md).
+
+Service names and ports below are the compose names (`backend`, `auth`, ...); the chart will
+choose the real Service names.
+
+## Route table
+
+nginx picks the longest matching prefix; `/` is the fallback. Traefik does the same when rules
+are `PathPrefix(...)`, because its default priority is the rule length. All prefixes below are
+written with the trailing slash that nginx uses (so `/api/v1` without a slash goes to the
+frontend, as in upstream; use ``PathPrefix(`/api/v1/`)``, not ``PathPrefix(`/api/v1`)``, which also
+matches `/api/v1foo`).
+
+| # | Path prefix | Target (service:port) | Path handling | Body limit | In use? |
+|---|---|---|---|---|---|
+| 1 | `/auth/` | auth:7000 | **kept** (`/auth/x` -> `/auth/x`) | nginx default 1M | yes |
+| 2 | `/api/v1/` | backend:3500 | **stripped** (`/api/v1/x` -> `/x`; `/api/v1/` -> `/`) | 40M | yes |
+| 3 | `/api/v2/` | auth:7000 | **kept** (`/api/v2/x` -> `/api/v2/x`) | 40M | only if `RSD_API_ACCESS_TOKEN_ENABLED=true` |
+| 4 | `/image/` | backend:3500 | **stripped** (`/image/rpc/get_image?uid=ID` -> `/rpc/get_image?uid=ID`, query kept) | nginx default 1M | yes |
+| 5 | `/metadata/codemeta/` | codemeta:8000 | stripped | default | optional |
+| 6 | `/swagger/` | swagger:8080 | stripped | default | optional |
+| 7 | `/documentation/` | documentation:80 | stripped | default | optional (but linked from the UI) |
+| 8 | `/` (everything else) | frontend:3000 | kept | default | yes |
+
+Notes per row:
+
+- **1 `/auth/`**: also carries the ORCID redirect URIs `/auth/login/orcid` and
+  `/auth/couple/orcid` (see configuration.md), so this route must be reachable from browsers.
+  nginx sets `Host: $host` and `X-Real-IP`; neither is read by the auth code (grep finds no use
+  of `X-Real-IP`/`X-Forwarded-*` in `authentication/`, `frontend/app`, `frontend/auth`).
+  Traefik passes `Host` through by default and adds `X-Forwarded-*`/`X-Real-Ip`.
+- **2 `/api/v1/`**: the browser-facing PostgREST API. The frontend uses relative `/api/v1/...` URLs
+  in the browser (`frontend/utils/fetchHelpers.ts`, `getBaseUrl()`), and the internal `POSTGREST_URL`
+  server-side. The `/api` prefix is shared with Next.js's own `/api/fe/...` routes; those do not
+  match `/api/v1/` or `/api/v2/` and fall through to row 8.
+- **3 `/api/v2/`**: served by the auth service, which validates a personal access token and then
+  proxies to PostgREST (`ProxyWithAccessTokenHandler`). Route not registered (404) when the env
+  var is not `true`.
+- **4 `/image/`**: nginx does `rewrite /image/(.+) /$1 break;`, which is exactly "strip the
+  `/image` prefix and keep the query string". The only caller is `frontend/utils/editImage.ts`
+  (`/image/rpc/get_image?uid=...`), so a plain StripPrefix is sufficient; a regex is not
+  needed. The DB function `get_image` sets `Cache-Control: max-age=31536001`,
+  `Content-Disposition: inline` and the real `Content-Type` through `response.headers`; these must
+  pass through untouched.
+- **5 `/metadata/codemeta/`**: nginx also rewrites upstream `Location` headers
+  (`proxy_redirect ~(.*) /metadata/codemeta$1`). The codemeta service redirects unknown paths to `/`
+  (`codemeta/src/main.go`). No Traefik middleware rewrites `Location`, so in Traefik such redirects
+  land on the site root. Cosmetic; ignore.
+- **6 `/swagger/`** and **7 `/documentation/`**: stripping is required. The documentation
+  image serves the Docusaurus build from the web root, although the site is built with
+  `baseUrl: '/documentation/'`, so `/documentation/assets/x.js` must arrive as `/assets/x.js`.
+- **8 `/`**: no special handling is needed. See "Things nginx does that should not be copied".
+
+## Per-route headers, compression, limits
+
+### Request headers added or overridden by nginx
+
+| Route | Header | Value | Needed in Traefik? |
+|---|---|---|---|
+| 1, 2, 3 | `Host` | `$host` (original) | default behaviour, nothing to do |
+| 1, 2, 3 | `X-Real-IP` | client IP | not read by any code; Traefik sets it itself |
+| 2, 3 | `Connection` | `""` + HTTP/1.1 | keep-alive upstream; Traefik default |
+| **4** | **`Accept`** | **`application/octet-stream`** (replaces whatever the browser sent) | **yes** (see below) |
+| 8 | `Upgrade`, `Connection: upgrade` | forwarded on **every** request | no (see below) |
+
+**Accept on `/image/`** is needed. `get_image` is declared to return the PostgREST media-type
+domain `"application/octet-stream"` (`database/003-create-image-table.sql`), and a browser
+`<img>` request sends `Accept: image/avif,image/webp,*/*;q=0.8`. nginx forces the header so
+PostgREST always selects the binary handler. Keep this behaviour (set, not append). I did not
+test what PostgREST returns for the browser's own Accept header, so do not remove the override
+without testing.
+
+### Response headers
+
+| Route | nginx behaviour | Needed? |
+|---|---|---|
+| 2, 3 | `default_type application/json` | no; only applies when the upstream sends no Content-Type, and PostgREST always does |
+| 2, 3 | hide upstream `Content-Location`, add `Content-Location: /api/<upstream value>` | **no** (see next section) |
+| all | none other | Next.js adds its own security headers (HSTS, CSP, X-Frame-Options...) for the frontend only; `/api/v1` responses have none upstream either |
+
+### Content-Location rewrite on `/api/v1` and `/api/v2`: is it needed?
+
+**No. Recommend dropping it.**
+
+- What it does: PostgREST sets `Content-Location` to its own request path and query
+  (e.g. `/mention?id=eq.1`). nginx replaces it with `/api/` + that value.
+- It is not correct as written: the result is `/api//mention?id=eq.1` (double slash, `/api`
+  instead of `/api/v1`), so the header does not point at a fetchable URL. When the upstream sends no
+  header, nginx still adds a bare `Content-Location: /api/`.
+- Nothing in this repo reads it. `grep -rIil content-location` over the whole tree (excluding
+  `node_modules`, `.next`, `.git`) matches only `nginx/nginx.conf` and this plan. The frontend
+  uses `fetch()` and looks only at status and body; the scrapers, auth, codemeta and
+  background-services call PostgREST directly (`POSTGREST_URL`), never through nginx; the e2e
+  and backend tests do not check it.
+- Traefik could not reproduce it anyway: the Headers middleware only sets static values and
+  cannot interpolate an upstream header. The exact behaviour would need a plugin.
+- Residual risk: an external API client that parses `Content-Location` from `/api/v1`. We cannot rule
+  that out for third parties, but the existing value is already malformed. If wanted, strip
+  the header with `customResponseHeaders: {Content-Location: ""}` on routes 2 and 3 (an empty value
+  removes it) so that clients never see PostgREST's un-prefixed path.
+
+### Body-size limits
+
+- nginx: `client_max_body_size 40M` on `/api/v1/` and `/api/v2/` (comment in the file: "needed to
+  increase size for the migration script"); every other location has nginx's default of 1M.
+- Traefik applies **no** request-body limit unless a Buffering middleware is attached, so nothing is
+  required to *allow* 40M. To keep a cap, attach Buffering with `maxRequestBodyBytes: 41943040` on
+  routes 2 and 3. Caveat: Buffering reads the whole body (memory up to `memRequestBodyBytes`,
+  disk beyond) before forwarding, and responds 413 above the limit. Decision for you: keep the cap
+  (matches upstream, protects PostgREST) or leave it uncapped (simpler). Proposed: keep it on 2
+  and 3 only.
+- Because Traefik has no 1M default, routes 1, 4 and 8 are more permissive than upstream. No known
+  upload goes through them (image upload uses `/api/v1`). Acceptable; if the ingress controller has a global
+  cap, make sure it is >= 40M for 2 and 3 (and that it applies to the auth service for `/api/v2`).
+
+### Compression
+
+- nginx (server-wide, so every location): `gzip on; gzip_proxied any; gzip_comp_level 4;
+  gzip_types text/css application/javascript image/svg+xml;`. nginx always includes `text/html`
+  in addition. So JSON from PostgREST is **not** compressed upstream, nor are images
+  (`application/octet-stream`).
+- Traefik: **Compress** middleware (gzip, optionally br/zstd). Its default compresses everything
+  above 1024 bytes except a small exclusion list, which would also compress JSON (a harmless,
+  mostly beneficial deviation) and image blobs (wasteful). Proposed: attach Compress to row 8
+  (`/`) and, if wanted, to rows 2 and 3; **not** to row 4 (images). If the Traefik version
+  supports `includedContentTypes`, use `text/css`, `text/html`, `application/javascript`,
+  `image/svg+xml` (plus `application/json` for rows 2 and 3) to mirror nginx exactly.
+- The Next.js server also compresses responses itself (no `compress: false` in
+  `frontend/next.config.ts`), and Traefik's Compress skips responses that already carry a
+  `Content-Encoding`. So Compress on row 8 may be a no-op; it is cheap insurance, not required.
+
+### WebSocket upgrade on `/`
+
+nginx forwards `Upgrade`/`Connection: upgrade` on **every** request to the frontend and sets
+`proxy_cache_bypass $http_upgrade`. The reason is Next.js dev-mode HMR. The production standalone
+server (`node server.js`) opens no WebSockets, and nothing in `frontend/` uses a WebSocket client.
+Traefik forwards upgrade requests natively anyway. **Nothing to configure**, and the
+unconditional `Connection: upgrade` should not be copied.
+
+## Middlewares implied (no manifests)
+
+| Middleware | Where | Parameter |
+|---|---|---|
+| StripPrefix | row 2 | `/api/v1` |
+| StripPrefix | row 4 | `/image` |
+| Headers (request) | row 4 | `Accept: application/octet-stream` |
+| StripPrefix | row 5 | `/metadata/codemeta` (optional route) |
+| StripPrefix | row 6 | `/swagger` (optional route) |
+| StripPrefix | row 7 | `/documentation` (optional route) |
+| Buffering | rows 2, 3 | `maxRequestBodyBytes: 41943040` (optional, see above) |
+| Compress | row 8 (and optionally 2, 3) | see above; not on row 4 |
+| Headers (response) | rows 2, 3 | `Content-Location: ""` (optional, see above) |
+| (none) | rows 1, 3, 8 | prefixes kept as is |
+| ReplacePathRegex | **not needed** | nginx's `/image/(.+)` -> `/$1` is a prefix strip |
+
+I deviate from the brief on two points: `ReplacePathRegex` for `/image` is unnecessary, and the
+Content-Location rewrite should be dropped.
+
+## Not routing, but needed at the edge
+
+- TLS termination for the host, plus HTTP->HTTPS redirect (nginx here does neither; certbot lived in
+  the image). The auth service sets `Secure` cookies (`rsd_token`, `rsd_login_failure_message`), and the
+  frontend sets `rsd_pathname` with `Secure; SameSite=None`, so **the site only works over HTTPS**.
+- No `www.` redirect is needed (`www.localhost` in nginx is a dev-only vhost for ORCID sandbox).
+- If Traefik sits behind a load balancer, configure trusted forwarded-header IPs on the entrypoint
+  so `X-Forwarded-*` is not spoofable. A cluster concern.
+- Network side: only rows 1-8 are public. PostgREST's admin port (3501), PostgreSQL and the auth debug port
+  must have no route.
+
+## Open: what I need from you to turn this into manifests (open question 3)
+
+1. **Mechanism**: does the chart emit a Traefik `IngressRoute` (CRD), a standard `Ingress`, or a
+   Gateway API `HTTPRoute`, or does the "service registry" generate routes from labels/annotations
+   on `Service` objects (and then the chart only adds annotations)?
+2. **Annotation/label scheme** the registry expects: key names, how a path prefix and
+   StripPrefix/middleware options are expressed (e.g. per-Service annotation with host, path,
+   port, middlewares?), and whether it can express a *different* backend per path prefix
+   for the same host (we need 4-8 routes on one host).
+3. **Middleware ownership**: may the chart create Traefik `Middleware` objects in its namespace and
+   reference them (`<ns>-<name>@kubernetescrd`), or must they be cluster-provided/named in the registry?
+   Is cross-namespace reference enabled?
+4. **cert-manager**: `ClusterIssuer` (or `Issuer`) name, challenge type (HTTP-01 or DNS-01), and whether
+   the registry creates the `Certificate`, or the chart must (secret name, `dnsNames`).
+5. **Entrypoint names** (`web`/`websecure` or custom), existing global HTTP->HTTPS redirect, and
+   the Traefik version (for `includedContentTypes`, Gateway API support).
+6. **Namespace** and any NetworkPolicy defaults (default-deny egress would block the auth pod from
+   reaching `orcid.org`; see services.md).

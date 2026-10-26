@@ -1,0 +1,8 @@
+# PLANT-COMMONS: minimal required overrides so lint/template can run in CI without a cluster or secrets.
+# Obviously fake; never deploy with this file.
+image:
+  namespace: example/plant-commons
+  tag: sha-0000000
+existingSecret: plant-commons-secrets
+orcid:
+  clientId: APP-0000000000000000

@@ -1,0 +1,27 @@
+Plant Commons {{ .Chart.AppVersion }} (chart {{ .Chart.Version }}), release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+Images: {{ .Values.image.registry }}/{{ .Values.image.namespace }}/plant-commons-<service>:{{ .Values.image.tag }}
+Public URL: {{ include "pc.hostUrl" . }}   Auth: {{ .Values.auth.providers }}
+
+Next steps (docs/plant-commons/chart.md, "First-install checklist"):
+
+1. Wait for the pods:  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+2. ORCID must have BOTH redirect URIs registered for the client {{ .Values.orcid.clientId }}:
+     {{ include "pc.hostUrl" . }}/auth/login/orcid
+     {{ include "pc.hostUrl" . }}/auth/couple/orcid
+3. ORCID discovery runs ONCE when the auth pod starts and is never retried. Check, through the public
+   URL once routing is in place (or kubectl port-forward svc/{{ include "pc.svc" (dict "ctx" . "c" "auth") }} 7000:7000):
+     curl -s {{ include "pc.hostUrl" . }}/auth/providers      # must list orcid, not []
+   If it is [], fix egress to orcid.org:443 and restart the auth pod.
+4. First admin (INVITE_ONLY needs one; nothing is created by the chart): see the README, "First admin".
+{{- if not .Values.routing.enabled }}
+
+routing.enabled=false: this chart created NO route and NO certificate. Traffic cannot reach the
+site until routing/TLS is provided (open question 3, docs/plant-commons/routing.md).
+{{- end }}
+
+Note: the documentation service is not deployed; the frontend's hard-coded /documentation/... links
+will 404 (implementation.md, open question 17).
+{{- if .Values.secrets.create }}
+
+WARNING: secrets.create=true. The credentials are stored in the Helm release secret. Local tests only.
+{{- end }}

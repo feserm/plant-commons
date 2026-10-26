@@ -1,0 +1,74 @@
+{{- /*
+STUB, UNTESTED, OFF (dbMigration.enabled=false). There is no migration runner upstream: the schema is only
+created on first start with an empty data directory. For an upgrade you supply upstream's migration SQL for
+the release in a ConfigMap and run it through psql as the superuser. Read README.md ("Database upgrades")
+first. Not run in any cluster; the psql invocation was only checked against the rsd/database image locally.
+*/ -}}
+{{- if .Values.dbMigration.enabled }}
+{{- $c := "db-migration" }}
+{{- $v := dict "podSecurityContext" .Values.database.podSecurityContext "securityContext" .Values.database.securityContext "resources" .Values.database.resources }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "pc.name" (dict "ctx" . "c" $c) }}-{{ .Values.dbMigration.name }}
+  labels:
+    {{- include "pc.labels" (dict "ctx" . "c" $c) | nindent 4 }}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "pc.selectorLabels" (dict "ctx" . "c" $c) | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml $v.podSecurityContext | nindent 8 }}
+      containers:
+        - name: psql
+          image: {{ include "pc.image" (dict "ctx" . "c" "database") | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Exec-form args for the image's docker-entrypoint.sh (it execs anything that is not `postgres`).
+          # ON_ERROR_STOP + single transaction: a failing migration leaves the database unchanged.
+          # $(VAR) is expanded by Kubernetes from the env below. The ConfigMap of background-services holds
+          # exactly POSTGRES_DB_HOST/_PORT/POSTGRES_DB/POSTGRES_USER, so it is reused here.
+          args:
+            - psql
+            - --set=ON_ERROR_STOP=1
+            - --single-transaction
+            - --host=$(POSTGRES_DB_HOST)
+            - --port=$(POSTGRES_DB_HOST_PORT)
+            - --username=$(POSTGRES_USER)
+            - --dbname=$(POSTGRES_DB)
+            - --file=/migration/migration.sql
+          envFrom:
+            - configMapRef:
+                name: {{ include "pc.configName" (dict "ctx" . "c" "background-services") }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pc.secretName" . }}
+                  key: POSTGRES_PASSWORD
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml $v.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: migration
+              mountPath: /migration
+              readOnly: true
+      volumes:
+        - name: migration
+          configMap:
+            name: {{ .Values.dbMigration.configMapName | quote }}
+            items:
+              - key: {{ .Values.dbMigration.configMapKey | quote }}
+                path: migration.sql
+{{- end }}

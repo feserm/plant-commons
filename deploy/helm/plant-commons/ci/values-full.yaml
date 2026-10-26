@@ -1,0 +1,24 @@
+# PLANT-COMMONS: every optional part switched on with placeholder inputs, only to render and lint all templates
+# in CI (together with values-ci.yaml). Obviously fake; never deploy with this file.
+scrapers:
+  enabled: true
+swagger:
+  enabled: true
+dbMigration:
+  enabled: true
+  configMapName: example-migration
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: example-ingress-namespace}}
+  egress:
+    enabled: true
+    orcid:
+      - ipBlock: {cidr: 192.0.2.1/32} # TEST-NET-1 documentation address, not ORCID's
+    scrapers:
+      - ipBlock: {cidr: 192.0.2.2/32}
+routing:
+  enabled: true
+  entryPoints: [example-entrypoint]
+  certificate:
+    issuerRef: {name: example-issuer}

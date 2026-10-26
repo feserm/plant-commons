@@ -1,0 +1,14 @@
+{{- if .Values.scrapers.enabled }}
+{{- $c := "scrapers" }}
+{{- $v := .Values.scrapers }}
+{{- $cfg := include "pc.config.scrapers" . | fromYaml }}
+{{- /* One container running `cron -f` (not a CronJob). 1 replica, Recreate, no Service, no ports. */}}
+{{- $spec := dict "ctx" . "c" $c "v" $v "image" (include "pc.image" (dict "ctx" . "c" $c))
+  "checksum" (include "pc.configChecksum" (dict "data" $cfg))
+  "envBlock" (include "pc.env" (dict "ctx" . "c" $c "config" true "secrets" (list "PGRST_JWT_SECRET")
+      "optionalSecrets" (list "API_CREDENTIALS_GITHUB" "ZENODO_ACCESS_TOKEN" "OPENALEX_API_KEY" "LIBRARIES_IO_ACCESS_TOKEN")))
+  "replicas" 1 "strategy" (dict "type" "Recreate") }}
+{{ include "pc.configmap" (dict "ctx" . "c" $c "data" $cfg) }}
+---
+{{ include "pc.deployment" $spec }}
+{{- end }}
