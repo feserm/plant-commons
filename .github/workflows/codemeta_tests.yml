@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: 2026 Dusan Mijatovic (Netherlands eScience Center)
+# SPDX-FileCopyrightText: 2026 Netherlands eScience Center
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: codemeta tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "codemeta/**"
+  pull_request:
+    paths:
+      - "codemeta/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codemeta-build-test:
+    name: Build Go and Save Context
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.1'
+          cache: true
+          cache-dependency-path: codemeta/src/go.sum
+
+      - name: Build Application Binary
+        working-directory: codemeta/src
+        run: go build -v -o ./app
+
+      - name: Build Scraper Binary
+        working-directory: codemeta/src
+        run: go build -v -o ./scraper-4tu codemeta/scrapers
+
+      # Save PR tracking variables safely into a clean folder
+      - name: Save PR info
+        run: |
+          mkdir -p pr_info
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.number }}" > pr_info/pr_number.txt
+            echo "${{ github.event.pull_request.base.ref }}" > pr_info/pr_base.txt
+            echo "PR_NUMBER: ${{ github.event.pull_request.number }}"
+          else
+            echo "false" > pr_info/pr_number.txt
+            echo "false" > pr_info/pr_base.txt
+            echo "Not a pull_request. Event: ${{ github.event_name }}"
+          fi
+
+      - name: Upload Metadata Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: codemeta-pr-metadata
+          path: pr_info/
+          retention-days: 1

@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: 2022 - 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+// SPDX-FileCopyrightText: 2022 - 2026 Netherlands eScience Center
+//
+// SPDX-License-Identifier: Apache-2.0
+
+package nl.esciencecenter.rsd.authentication;
+
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.JWTVerifier;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import java.util.Objects;
+
+public class JwtVerifier {
+
+	private final String signingSecret;
+
+	public JwtVerifier(String signingSecret) {
+		this.signingSecret = Objects.requireNonNull(signingSecret);
+	}
+
+	/**
+	 * Verify a JWT.
+	 *
+	 * @param token the JWT to verify
+	 * @return a verified and decoded JWT
+	 * @throws JWTVerificationException when the JWT is not valid (e.g. it is expired or tempered with or <code>null</code>)
+	 */
+	DecodedJWT verify(String token) {
+		if (token == null) {
+			throw new JWTVerificationException("Token was null");
+		}
+		Algorithm signingAlgorithm = Algorithm.HMAC256(signingSecret);
+		JWTVerifier verifier = JWT.require(signingAlgorithm).build();
+		return verifier.verify(token);
+	}
+}

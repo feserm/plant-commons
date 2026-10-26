@@ -1,0 +1,302 @@
+[
+  {
+      "slug": "icdgems",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "ICD_GEMs.jl",
+      "source": "software",
+      "is_published": true,
+      "rank": 1,
+      "index_found": 0
+  },
+  {
+      "slug": "ienvironment",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "iEnvironment",
+      "source": "software",
+      "is_published": false,
+      "rank": 1,
+      "index_found": 0
+  },
+  {
+      "slug": "test-bitbucket",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "test-bitbucket",
+      "source": "software",
+      "is_published": true,
+      "rank": 2,
+      "index_found": 0
+  },
+  {
+      "slug": "knime-testflow",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "KNIME Testflow",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 7
+  },
+  {
+      "slug": "software-grotesque-scarce-jovially-boo",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Software: grotesque scarce jovially boo",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 13
+  },
+  {
+      "slug": "project-mean-attest-husband-cull-knife-upliftingly-owl-rosy-jackal-twin-which-health-greatly-plus-loan-friendship-ah-book",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Project: mean attest husband cull knife upliftingly owl rosy jackal twin which health greatly plus loan friendship ah book",
+      "source": "projects",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 16
+  },
+  {
+      "slug": "project-under-grotesque-leisure-unless-incarcerate",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Project: under grotesque leisure unless incarcerate",
+      "source": "projects",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 18
+  },
+  {
+      "slug": "software-bountiful-abaft-testy-wall-urgently",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Software: bountiful abaft testy wall urgently",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 26
+  },
+  {
+      "slug": "software-pasteurise-solemnize-of-grotesque",
+      "domain": "https://research-software.dev",
+      "rsd_host": "@research-software.dev",
+      "name": "Software: pasteurise solemnize of grotesque",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 37
+  },
+  {
+      "slug": "project-since-gaze-likewise-reincarnate-grotesque",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Project: since gaze likewise reincarnate grotesque",
+      "source": "projects",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 44
+  },
+  {
+      "slug": "organisation-incidentally-shakily-though-cry-busily-minus-contest-slippery-physically-unripe-astride-longingly-political-yawningly-gah-perfumed-greedily-smother-woefully-um-where-drat-tab-lively-fast",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Organisation: incidentally shakily though cry busily minus contest slippery physically unripe astride longingly political yawningly gah perfumed greedily smother woefully um where drat tab lively fast",
+      "source": "organisations",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 62
+  },
+  {
+      "slug": "community-willing-ha-puny-although-apud-capital-thunderbolt-phew-protest-switching-who-handful-ignorant-aquifer-sweaty-afterwards-normal-er-average-windage-partake-while-prophet",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Community: willing ha puny although apud capital thunderbolt phew protest switching who handful ignorant aquifer sweaty afterwards normal er average windage partake while prophet",
+      "source": "communities",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 69
+  },
+  {
+      "slug": "software-yum-sympathize-grounded-soft-beatboxer-rail-couple-continually-hostess-dimension-atop-stem-unsung-rhyme-mainstream-and-soon-tangible-lawful-lest-whopping-terribly-warmly-recoil-squat-oof-ha",
+      "domain": "https://research-software.dev",
+      "rsd_host": "@research-software.dev",
+      "name": "Software: yum sympathize grounded soft beatboxer rail couple continually hostess dimension atop stem unsung rhyme mainstream and soon tangible lawful lest whopping terribly warmly recoil squat oof ha ",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 76
+  },
+  {
+      "slug": "software-ugh-atop-unto-effacement-undress-between-secure-for-selfish-mmm-madly-near-drapes-testing-next-yawningly-er-offensively",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Software: ugh atop unto effacement undress between secure for selfish mmm madly near drapes testing next yawningly er offensively",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 92
+  },
+  {
+      "slug": "organisation-outstrip-upon-carelessly-fooey-evenly-openly-pfft-hence-arrest-bitterly-indeed-quintessential-decipher-unique-showboat-deep-oof",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Organisation: outstrip upon carelessly fooey evenly openly pfft hence arrest bitterly indeed quintessential decipher unique showboat deep oof",
+      "source": "organisations",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 97
+  },
+  {
+      "slug": "real-software-happily-yuck-basics-responsible-gracefully-brr-panther-absentmindedly-blizzard-solemnly-pish-equalize-supersede-modulo-correctly-armadillo-apropos-actually-scarcely-attest-cylindrical-m",
+      "domain": "https://research-software.dev",
+      "rsd_host": "@research-software.dev",
+      "name": "Real software: happily yuck basics responsible gracefully brr panther absentmindedly blizzard solemnly pish equalize supersede modulo correctly armadillo apropos actually scarcely attest cylindrical m",
+      "source": "software",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 182
+  },
+  {
+      "slug": "project-rudely-salami-proffer-and-practical-thorny-wherever-drat-philosophise-automatic-through-stick-woot-irritably-magic-custard-bronze-dead-kaleidoscopic-impossible-tango-evaporate-matrix-retest-i",
+      "domain": null,
+      "rsd_host": null,
+      "name": "Project: rudely salami proffer and practical thorny wherever drat philosophise automatic through stick woot irritably magic custard bronze dead kaleidoscopic impossible tango evaporate matrix retest i",
+      "source": "projects",
+      "is_published": true,
+      "rank": 3,
+      "index_found": 194
+  },
+  {
+      "slug": "grainlearning",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "GrainLearning",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "virus-seq",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "Virus Seq",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "incompressiblenavierstokes",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "IncompressibleNavierStokes",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "orange3-argument-add-on",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "Orange3 Argument Mining Add-on",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "horton",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "HORTON",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "xenon-docker-images",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "Xenon Docker images",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "parcels",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "Parcels",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "proteus",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "PROTEUS",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "robist",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "ROBIST",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "3d-e-chem-sygma",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "SyGMa",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "splithalfr",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "splithalfr",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "exploreasl",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "ExploreASL",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  },
+  {
+      "slug": "benchmarkrecovery",
+      "domain": "https://research-software-directory.org",
+      "rsd_host": "@research-software-directory.org",
+      "name": "BenchmarkRecovery",
+      "source": "software",
+      "is_published": true,
+      "rank": 4,
+      "index_found": 0
+  }
+]

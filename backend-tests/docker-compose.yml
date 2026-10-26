@@ -1,0 +1,122 @@
+# SPDX-FileCopyrightText: 2022 - 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+# SPDX-FileCopyrightText: 2022 - 2026 Netherlands eScience Center
+# SPDX-FileCopyrightText: 2022 Christian Meeßen (GFZ) <christian.meessen@gfz-potsdam.de>
+# SPDX-FileCopyrightText: 2022 Dusan Mijatovic (dv4all)
+# SPDX-FileCopyrightText: 2022 Helmholtz Centre Potsdam - GFZ German Research Centre for Geosciences
+# SPDX-FileCopyrightText: 2022 dv4all
+#
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  database:
+    container_name: database-test
+    build: ../database
+    image: rsd/database-test:1.0.0
+    ports:
+      # enable connection from outside
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=rsd-db
+      - POSTGRES_USER=rsd
+      - POSTGRES_PASSWORD=securepassword
+      - POSTGRES_AUTHENTICATOR_PASSWORD=simplepassword
+    volumes:
+      # persist data in named docker volume
+      # to remove use: docker compose down --volumes
+      # to inspect use: docker volume ls
+      - pgdb-test:/var/lib/postgresql/data/
+    networks:
+      - net-test
+
+  backend:
+    container_name: backend-postgrest-test
+    build: ../backend-postgrest
+    image: rsd/backend-postgrest-test:1.0.0
+    ports:
+      # enable connection from outside
+      - "3500:3500"
+    environment:
+      - PGRST_DB_PRE_REQUEST=public.pre_request_hook
+      - PGRST_DB_URI=postgres://rsd_authenticator:simplepassword@database:5432/rsd-db
+      - PGRST_DB_ANON_ROLE=rsd_web_anon
+      - PGRST_DB_SCHEMA=public
+      - PGRST_SERVER_HOST=backend
+      - PGRST_SERVER_PORT=3500
+      - PGRST_ADMIN_SERVER_PORT=3501
+      - PGRST_JWT_SECRET=normally_this_is_a_secret_string_that_none_knows_BUT_this_is_just_a_test
+    depends_on:
+      - "database"
+    networks:
+      - net-test
+    healthcheck:
+        test: [ "CMD", "postgrest", "--ready" ]
+        interval: 5s
+        retries: 2
+        timeout: 5s
+        start_period: 60s
+        start_interval: 1s
+
+  codemeta:
+    container_name: codemeta-test
+    build: ../codemeta
+    image: rsd/codemeta-test:1.0.0
+    ports:
+      # enable connection from outside
+      - "8000:8000"
+    environment:
+      - POSTGREST_URL
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net-test
+
+  auth:
+    build: ../authentication
+    image: rsd/auth-tests:1.0.0
+    ports:
+      - "7000:7000"
+    environment:
+      # it uses values from .env file
+      - RSD_ENVIRONMENT=test
+      - POSTGREST_URL=http://backend:3500
+      - PGRST_JWT_SECRET=normally_this_is_a_secret_string_that_none_knows_BUT_this_is_just_a_test
+      - RSD_API_ACCESS_TOKEN_ENABLED=true
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net-test
+
+  postgrest-tests:
+    container_name: postgrest-tests
+    build:
+      context: .
+      # dockerfile to use for build
+      dockerfile: ./Dockerfile
+    image: rsd/postgrest-tests:1.0.0
+    environment:
+      - PGRST_JWT_SECRET=normally_this_is_a_secret_string_that_none_knows_BUT_this_is_just_a_test
+      - POSTGREST_URL=http://backend:3500
+      - CODEMETA_URL=http://codemeta:8000
+      - AUTH_URL=http://auth:7000/auth
+      - API_V2_URL=http://auth:7000/api/v2
+    depends_on:
+      backend:
+        condition: service_healthy
+      auth:
+        condition: service_started
+      codemeta:
+        condition: service_started
+    networks:
+      - net-test
+
+# define name for docker network
+# it should have name: rsd-as-a-service_net-test
+networks:
+  net-test:
+
+# named volumes can be managed easier using docker compose
+# volume should have name rsd-as-a-service_pgdb
+volumes:
+  pgdb-test:

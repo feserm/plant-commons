@@ -1,0 +1,12 @@
+// SPDX-FileCopyrightText: 2025 - 2026 Dusan Mijatovic (Netherlands eScience Center)
+// SPDX-FileCopyrightText: 2025 - 2026 Netherlands eScience Center
+//
+// SPDX-License-Identifier: Apache-2.0
+
+const useOrgProjectCategoriesList=jest.fn(()=>{
+  return {
+    categoryFilters:[]
+  }
+})
+
+export default useOrgProjectCategoriesList

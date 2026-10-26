@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2022 - 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+# SPDX-FileCopyrightText: 2022 - 2026 Netherlands eScience Center
+# SPDX-FileCopyrightText: 2022 Dusan Mijatovic (dv4all)
+# SPDX-FileCopyrightText: 2022 dv4all
+# SPDX-FileCopyrightText: 2026 Dusan Mijatovic (Netherlands eScience Center)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: authentication tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "authentication/**"
+  pull_request:
+    paths:
+      - "authentication/**"
+
+jobs:
+  authentication-tests:
+    name: authentication tests
+    uses: ./.github/workflows/_java_tests.yml
+    with:
+      working_directory: "authentication"
+      artifact_name: "authentication-target-dir"

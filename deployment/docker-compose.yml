@@ -1,0 +1,254 @@
+# SPDX-FileCopyrightText: 2022 - 2025 Christian Meeßen (GFZ) <christian.meessen@gfz-potsdam.de>
+# SPDX-FileCopyrightText: 2022 - 2025 Helmholtz Centre Potsdam - GFZ German Research Centre for Geosciences
+# SPDX-FileCopyrightText: 2022 - 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+# SPDX-FileCopyrightText: 2022 - 2026 Netherlands eScience Center
+# SPDX-FileCopyrightText: 2022 Dusan Mijatovic (dv4all)
+# SPDX-FileCopyrightText: 2022 Helmholtz Centre for Environmental Research (UFZ)
+# SPDX-FileCopyrightText: 2022 dv4all
+# SPDX-FileCopyrightText: 2023 - 2025 Dusan Mijatovic (Netherlands eScience Center)
+# SPDX-FileCopyrightText: 2025 Paula Stock (GFZ) <paula.stock@gfz.de>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+# THIS DOCKER FILE REQUIRES .env FILE
+
+services:
+  database:
+    container_name: database
+    image: ghcr.io/research-software-directory/rsd-saas/database:latest
+    expose:
+      - 5432
+    environment:
+      # it uses values from .env file
+      - POSTGRES_DB
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_AUTHENTICATOR_PASSWORD
+    volumes:
+      # persist data in named docker volume
+      # to remove use: docker compose down --volumes
+      # to inspect use: docker volume ls
+      - pgdb:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD", "pg_isready", "--username=${POSTGRES_USER}", "--dbname=${POSTGRES_DB}"]
+      interval: 1s
+      retries: 15
+      timeout: 5s
+      start_period: 5s
+    networks:
+      - net
+    restart: unless-stopped
+
+  backend:
+    container_name: backend
+    image: ghcr.io/research-software-directory/rsd-saas/backend:latest
+    expose:
+      - 3500
+    environment:
+      # it needs to be here to use values from .env file
+      - PGRST_DB_PRE_REQUEST=public.pre_request_hook
+      - PGRST_DB_URI=postgres://rsd_authenticator:${POSTGRES_AUTHENTICATOR_PASSWORD}@${POSTGRES_DB_HOST}:${POSTGRES_DB_HOST_PORT}/${POSTGRES_DB}
+      - PGRST_DB_ANON_ROLE
+      - PGRST_DB_SCHEMA
+      - PGRST_SERVER_HOST=backend
+      - PGRST_SERVER_PORT
+      - PGRST_ADMIN_SERVER_PORT
+      - PGRST_JWT_SECRET
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "postgrest", "--ready" ]
+      interval: 5s
+      retries: 2
+      timeout: 5s
+      start_period: 60s
+      start_interval: 1s
+
+  auth:
+    container_name: auth
+    image: ghcr.io/research-software-directory/rsd-saas/auth:latest
+    expose:
+      - 7000
+    environment:
+      # it uses values from .env file
+      - RSD_ENVIRONMENT
+      - POSTGREST_URL
+      - RSD_AUTH_PROVIDERS
+      - SURFCONEXT_CLIENT_ID
+      - SURFCONEXT_WELL_KNOWN_URL
+      - HELMHOLTZID_CLIENT_ID
+      - HELMHOLTZID_WELL_KNOWN_URL
+      - HELMHOLTZID_SCOPES
+      - HELMHOLTZID_ALLOW_EXTERNAL_USERS
+      - ORCID_CLIENT_ID
+      - ORCID_WELL_KNOWN_URL
+      - AZURE_CLIENT_ID
+      - AZURE_WELL_KNOWN_URL
+      - AZURE_ORGANISATION
+      - AZURE_DISPLAY_NAME
+      - AZURE_DESCRIPTION_HTML
+      - LINKEDIN_CLIENT_ID
+      - LINKEDIN_WELL_KNOWN_URL
+      - GITHUB_CLIENT_ID
+      - GITHUB_WELL_KNOWN_URL
+      - AUTH_SURFCONEXT_CLIENT_SECRET
+      - AUTH_HELMHOLTZID_CLIENT_SECRET
+      - AUTH_ORCID_CLIENT_SECRET
+      - AUTH_AZURE_CLIENT_SECRET
+      - AUTH_LINKEDIN_CLIENT_SECRET
+      - AUTH_GITHUB_CLIENT_SECRET
+      - PGRST_JWT_SECRET
+      - RSD_API_ACCESS_TOKEN_ENABLED
+      - HOST_URL
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  background-services:
+    container_name: background-services
+    image: ghcr.io/research-software-directory/rsd-saas/background-services:latest
+    environment:
+      # it uses values from .env file
+      - POSTGRES_DB_HOST
+      - POSTGRES_DB_HOST_PORT
+      - POSTGRES_DB
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  frontend:
+    container_name: frontend
+    image: ghcr.io/research-software-directory/rsd-saas/frontend:latest
+    environment:
+      # it uses values from .env file
+      - POSTGREST_URL
+      - PGRST_JWT_SECRET
+      - RSD_REVERSE_PROXY_URL
+      - RSD_AUTH_URL
+      - CROSSREF_CONTACT_EMAIL
+      - MATOMO_URL
+      - MATOMO_ID
+      - ORCID_CLIENT_ID
+      - ORCID_WELL_KNOWN_URL
+      - LINKEDIN_CLIENT_ID
+      - LINKEDIN_WELL_KNOWN_URL
+    expose:
+      - 3000
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  scrapers:
+    container_name: scrapers
+    image: ghcr.io/research-software-directory/rsd-saas/scrapers:latest
+    environment:
+      # it uses values from .env file
+      - POSTGREST_URL
+      - MAX_REQUESTS_GITHUB
+      - MAX_REQUESTS_GITLAB
+      - MAX_REQUESTS_4TU
+      - MAX_REQUESTS_CODEBERG
+      - MAX_REQUESTS_DOI
+      - MAX_REQUESTS_OPENALEX
+      - MAX_REQUESTS_ROR
+      - ENABLE_NASSA_SCRAPER
+      - ENABLE_ESCAPE_OSSR_SCRAPER
+      - PGRST_JWT_SECRET
+      - API_CREDENTIALS_GITHUB
+      - ZENODO_ACCESS_TOKEN
+      - CROSSREF_CONTACT_EMAIL
+      - OPENALEX_API_KEY
+      - LIBRARIES_IO_ACCESS_TOKEN
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  codemeta:
+    container_name: codemeta
+    image: ghcr.io/research-software-directory/rsd-saas/codemeta:latest
+    expose:
+      - "8000"
+    environment:
+      - ENABLE_4TU_SCRAPER
+      - POSTGREST_URL
+      - PGRST_JWT_SECRET
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  swagger:
+    container_name: swagger
+    image: swaggerapi/swagger-ui:v5.32.6
+    expose:
+      - "8080"
+    environment:
+      - API_URL=${POSTGREST_URL_EXTERNAL}
+      - SUPPORTED_SUBMIT_METHODS=[]
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - net
+    restart: unless-stopped
+
+  documentation:
+    container_name: documentation
+    image: ghcr.io/research-software-directory/rsd-saas/documentation:latest
+    expose:
+      - "80"
+    networks:
+      - net
+    restart: unless-stopped
+
+  nginx:
+    container_name: nginx
+    image: ghcr.io/research-software-directory/rsd-saas/nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - lets-encrypt:/etc/letsencrypt
+    depends_on:
+      - database
+      - backend
+      - auth
+      - frontend
+      - codemeta
+      - swagger
+      - documentation
+    networks:
+      - net
+    restart: unless-stopped
+
+# define name for docker network
+# it should have name: rsd-as-a-service_net
+networks:
+  net:
+
+# named volumes can be managed easier using docker compose
+# volume should have name rsd-as-a-service_pgdb
+volumes:
+  pgdb:
+  lets-encrypt:

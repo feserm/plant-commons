@@ -1,0 +1,42 @@
+{
+  // ESLint
+  "eslint.workingDirectories": [
+    "./frontend",
+  ],
+  // Formating with ESLint:
+  "eslint.format.enable": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "[javascriptreact][typescript][typescriptreact]": {
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "dbaeumer.vscode-eslint",
+    "editor.formatOnSave": true,
+  },
+  "[javascript]": {
+    // "editor.tabSize": 2,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+  },
+  // Tailwind plugin integration
+  "css.validate": false,
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  "tailwindCSS.includeLanguages": {
+    "plaintext": "html"
+  },
+  // Backend
+  "[java]": {
+    "editor.suggest.snippetsPreventQuickSuggestions": false,
+    "editor.useTabStops": true,
+    "editor.insertSpaces": false,
+    // enable prettier format on save in VScode
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+  },
+  "cSpell.words": [
+    "dompurify"
+  ],
+  "makefile.configureOnOpen": false,
+}

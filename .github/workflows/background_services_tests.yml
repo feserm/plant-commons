@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2022 - 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+# SPDX-FileCopyrightText: 2022 - 2026 Netherlands eScience Center
+# SPDX-FileCopyrightText: 2022 Dusan Mijatovic (dv4all)
+# SPDX-FileCopyrightText: 2022 dv4all
+# SPDX-FileCopyrightText: 2026 Dusan Mijatovic (Netherlands eScience Center)
+#
+# SPDX-License-Identifier: Apache-2.0
+
+name: background-services tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "background-services/**"
+  pull_request:
+    paths:
+      - "background-services/**"
+
+jobs:
+  background-services-tests:
+    name: background-services tests
+    uses: ./.github/workflows/_java_tests.yml
+    with:
+      working_directory: "background-services"
+      artifact_name: "background-services-target-dir"

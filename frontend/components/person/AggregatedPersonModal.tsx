@@ -1,0 +1,272 @@
+// SPDX-FileCopyrightText: 2024 - 2026 Dusan Mijatovic (Netherlands eScience Center)
+// SPDX-FileCopyrightText: 2024 - 2026 Netherlands eScience Center
+// SPDX-FileCopyrightText: 2026 Ewan Cahen (Netherlands eScience Center) <e.cahen@esciencecenter.nl>
+//
+// SPDX-License-Identifier: Apache-2.0
+
+import {useEffect,JSX} from 'react'
+
+import Button from '@mui/material/Button'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
+
+import {UseFormSetValue, UseFormWatch, useForm} from 'react-hook-form'
+
+import {useSession} from '~/auth/AuthProvider'
+import {Person} from '~/types/Contributor'
+import useSmallScreen from '~/config/useSmallScreen'
+import ControlledTextField from '~/components/form/ControlledTextField'
+import ControlledSwitch from '~/components/form/ControlledSwitch'
+import SubmitButtonWithListener from '~/components/form/SubmitButtonWithListener'
+import ControlledAutocomplete from '~/components/form/ControlledAutocomplete'
+import AvatarOptionsPerson, {RequiredAvatarProps} from '~/components/person/AvatarOptionsPerson'
+import useAggregatedPerson from './useAggregatedPerson'
+import {modalConfig} from './config'
+
+
+type InputProps={
+  label:string
+  help?: string | JSX.Element
+  validation?: any
+}
+
+type AggregatedPersonModalConfig={
+  account: InputProps,
+  is_contact_person: Omit<InputProps,'validation'>,
+  given_names: InputProps,
+  family_names: InputProps,
+  email_address: InputProps,
+  orcid: InputProps,
+  role: InputProps,
+  affiliation: InputProps
+}
+
+type AggregatedPersonModalProps = Readonly<{
+  onCancel: () => void,
+  onSubmit: (person: FormPerson) => void,
+  person: Person
+  // default title is Profile, provide other value
+  title?: string
+  // default labels and validation are defined in ./config
+  // optionally provide custom config
+  config?: AggregatedPersonModalConfig
+}>
+
+export type FormPerson = Person & {
+  initial_avatar_id: string|null
+}
+
+const formId = 'aggregated-person-modal'
+
+export default function AggregatedPersonModal({
+  person,onCancel,onSubmit,
+  title='Profile',config=modalConfig
+}: AggregatedPersonModalProps) {
+  const {loading, options} = useAggregatedPerson(person?.orcid)
+  const session = useSession()
+  const isAdmin = session?.user?.role === 'rsd_admin'
+  const smallScreen = useSmallScreen()
+  const {handleSubmit, watch, formState, control, register, setValue, trigger} = useForm<FormPerson>({
+    mode: 'onChange',
+    defaultValues: {
+      ...person,
+      // copy avatar id
+      initial_avatar_id: person.avatar_id
+    }
+  })
+
+  // extract
+  const {isValid, isDirty} = formState
+  const formData = watch()
+
+  useEffect(()=>{
+    // when is_contact_person OR email_address changes
+    // we trigger additional validation on email because
+    // email is required for the contact person
+    trigger('email_address')
+  },[formData.email_address,formData.is_contact_person,trigger])
+
+  // console.group('AggregatedPersonModal')
+  // console.log('errors...', errors)
+  // console.log('isDirty...', isDirty)
+  // console.log('isValid...', isValid)
+  // console.log('formData...', formData)
+  // console.log('loading...', loading)
+  // console.log('options...', options)
+  // console.log('person...', person)
+  // console.groupEnd()
+
+  function handleCancel(e?:any, reason?:'backdropClick' | 'escapeKeyDown') {
+    if (reason && reason==='backdropClick') return
+    onCancel()
+  }
+
+  return (
+    <Dialog
+      // use fullScreen modal for small screens (< 600px)
+      fullScreen={smallScreen}
+      open={true}
+      onClose={handleCancel}
+    >
+      <DialogTitle>
+        {title}
+      </DialogTitle>
+      <form
+        id={formId}
+        onSubmit={handleSubmit((data) => onSubmit(data))}
+        autoComplete="off"
+        aria-label={title}
+      >
+        {/* hidden inputs */}
+        <input type="hidden"
+          {...register('id')}
+        />
+        {!isAdmin &&
+          <input type="hidden"
+            {...register('account')}
+          />
+        }
+        <input type="hidden"
+          {...register('position')}
+        />
+        <input type="hidden"
+          {...register('avatar_id')}
+        />
+        <input type="hidden"
+          {...register('initial_avatar_id')}
+        />
+        <DialogContent sx={{
+          width: ['100%', '40rem'],
+        }}>
+          <AvatarOptionsPerson
+            watch={watch as unknown as UseFormWatch<RequiredAvatarProps>}
+            setValue={setValue as unknown as UseFormSetValue<RequiredAvatarProps>}
+            avatar_options={options?.avatars ?? []}
+            loading={loading}
+          />
+          <section className="grid grid-cols-[1fr_1fr] gap-4">
+            <ControlledTextField
+              control={control}
+              options={{
+                // user cannot edit specific public profile information (account!==null)
+                disabled: formData.account!==null && !isAdmin,
+                name: 'given_names',
+                label: config.given_names.label,
+                useNull: true,
+                defaultValue: formData?.given_names,
+                helperTextMessage: config.given_names.help,
+                helperTextCnt: `${formData?.given_names?.length ?? 0}/${config.given_names.validation.maxLength.value}`,
+              }}
+              rules={config.given_names.validation}
+            />
+            <ControlledTextField
+              control={control}
+              options={{
+                // user cannot edit specific public profile information (account!==null)
+                disabled: formData.account!==null && !isAdmin,
+                name: 'family_names',
+                label: config.family_names.label,
+                useNull: true,
+                defaultValue: formData?.family_names,
+                helperTextMessage: config.family_names.help,
+                helperTextCnt: `${formData?.family_names?.length ?? 0}/${config.family_names.validation.maxLength.value}`,
+              }}
+              rules={config.family_names.validation}
+            />
+            <ControlledTextField
+              options={{
+                type: 'email',
+                name: 'email_address',
+                label: config.email_address.label,
+                useNull: true,
+                defaultValue: person?.email_address,
+                helperTextMessage: config.email_address.help,
+                helperTextCnt: `${formData?.email_address?.length ?? 0}/${config.email_address.validation().maxLength.value}`,
+              }}
+              control={control}
+              rules={config.email_address.validation(formData.is_contact_person)}
+            />
+            <ControlledTextField
+              options={{
+                // user cannot edit specific public profile information (account!==null)
+                disabled: formData.account!==null && !isAdmin,
+                name: 'orcid',
+                label: config.orcid.label,
+                useNull: true,
+                defaultValue: person?.orcid,
+                helperTextMessage: config.orcid.help,
+                // helperTextCnt: `${formData?.orcid?.length || 0}/${config.orcid.validation.maxLength.value}`,
+              }}
+              control={control}
+              rules={config.orcid.validation}
+            />
+            <ControlledAutocomplete
+              name="role"
+              label={config.role.label}
+              control={control}
+              options={options?.roles ?? []}
+              helperTextMessage={config.role.help}
+              rules={config.role.validation}
+            />
+            <ControlledAutocomplete
+              name="affiliation"
+              label={config.affiliation.label}
+              options={options?.affiliations ?? []}
+              control={control}
+              helperTextMessage={config.affiliation.help}
+              rules={config.affiliation.validation}
+            />
+            <ControlledSwitch
+              name="is_contact_person"
+              label={config.is_contact_person.label}
+              control={control}
+              defaultValue={false}
+            />
+            {isAdmin &&
+              <ControlledTextField
+                control={control}
+                options={{
+                  name: 'account',
+                  label: config.account.label,
+                  useNull: true,
+                  defaultValue: person?.account,
+                  helperTextMessage: config.account.help,
+                }}
+                rules={config?.account.validation}
+              />
+            }
+          </section>
+        </DialogContent>
+        <DialogActions>
+          {/*
+            Button order in the default styles is reversed  to achieve following goals:
+            First button in the tab order is first button at right side
+          */}
+          <SubmitButtonWithListener
+            formId={formId}
+            disabled={isSaveDisabled()}
+          />
+          <Button
+            onClick={handleCancel}
+            color="secondary"
+          >
+            Cancel
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  )
+
+  function isSaveDisabled() {
+    // if not valid -> save disabled
+    if (isValid === false) return true
+    // if valid and new entry (id===null) -> save enabled
+    if (formData.id === null) return false
+    // if valid and edit (id!=null) but not dirty/touched -> save disabled
+    if (isDirty === false) return true
+    // else -> save enabled
+    return false
+  }
+}
